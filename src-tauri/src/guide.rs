@@ -3,8 +3,7 @@
 //!
 //! XInput standard nu expune butonul Guide. Funcția nedocumentată
 //! `XInputGetStateEx` (ordinal 100 în xinput1_4.dll) îl expune ca bitul 0x0400.
-//! Controllerele DualSense funcționează dacă sunt mapate ca XInput
-//! (Steam Input, DS4Windows).
+//! Butonul PS de pe DualSense / DualShock 4 îl citim separat, prin HID (`pads.rs`).
 
 use tauri::AppHandle;
 
@@ -13,7 +12,31 @@ pub fn start(_app: AppHandle) {}
 
 #[cfg(windows)]
 pub fn start(app: AppHandle) {
-    std::thread::spawn(move || run(app));
+    let xinput = app.clone();
+    std::thread::spawn(move || run(xinput));
+    std::thread::spawn(move || crate::pads::watch_ps_button(|| fire(&app)));
+}
+
+/// Aduce Lumen în față și deschide meniul rapid. Un DualSense mapat și ca XInput
+/// (Steam Input, DS4Windows) apasă „de două ori”; a doua apăsare la mai puțin de
+/// 300 ms e ignorată, altfel meniul s-ar deschide și s-ar închide la loc.
+#[cfg(windows)]
+fn fire(app: &AppHandle) {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    use tauri::{Emitter, Manager};
+
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    if let Ok(mut last) = LAST.lock() {
+        if last.is_some_and(|t| t.elapsed() < Duration::from_millis(300)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        crate::platform::bring_to_front(&w);
+    }
+    let _ = app.emit("guide", ());
 }
 
 #[cfg(windows)]
@@ -21,7 +44,6 @@ fn run(app: AppHandle) {
     use crate::platform::win::{wide, GetProcAddress, LoadLibraryW};
     use std::ffi::c_void;
     use std::time::{Duration, Instant};
-    use tauri::{Emitter, Manager};
 
     #[repr(C)]
     #[derive(Default)]
@@ -76,10 +98,7 @@ fn run(app: AppHandle) {
             connected[i] = res == ERROR_SUCCESS;
             let down = connected[i] && st.pad.buttons & GUIDE != 0;
             if down && !was_down[i] {
-                if let Some(w) = app.get_webview_window("main") {
-                    crate::platform::bring_to_front(&w);
-                }
-                let _ = app.emit("guide", ());
+                fire(&app);
             }
             was_down[i] = down;
         }

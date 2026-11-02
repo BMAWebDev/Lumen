@@ -75,6 +75,14 @@ export function createInput({ onAction, onDevice }) {
       if (x < -STICK) active.set('left', p); else if (x > STICK) active.set('right', p);
       if (y < -STICK) active.set('up', p); else if (y > STICK) active.set('down', p);
     }
+    // Windows trimite starea controlerului și ferestrelor inactive: cât joci, apăsările
+    // sunt ale jocului. Le marcăm ca ținute, ca la revenire să nu se declanșeze singure.
+    if (!document.hasFocus()) {
+      held.clear();
+      for (const a of active.keys()) held.set(a, { next: Infinity });
+      requestAnimationFrame(frame);
+      return;
+    }
     for (const [a, p] of active) {
       const h = held.get(a);
       if (!h) {

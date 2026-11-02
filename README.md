@@ -14,7 +14,7 @@ The interface itself is in Romanian; menu labels below are quoted as they appear
 - **Launch and return**: games start through Steam, the Xbox app or their own executable. Lumen watches the processes in the game's folder, minimizes while you play and comes back to the foreground when you quit. Playtime is saved automatically.
 - **Battery**: the header shows the PC battery (on laptops and handhelds) and the battery of connected controllers (DualSense / DualShock 4 over HID, Xbox controllers via XInput).
 - **PlayStation controllers**: DualSense and DualShock 4 are detected, and button hints switch to ✕ ○ △.
-- **Guide button** (the Xbox logo on the controller) opens the quick menu from anywhere, even in game.
+- **Guide / PS button** opens the quick menu from anywhere, even in game. The Xbox Guide button is read through XInput, the PS button on DualSense / DualShock 4 directly over HID, so no Steam Input or DS4Windows is needed.
 - **Quick menu**: Home, Library, Close game, Refresh, Settings, Power (sleep, restart, shut down).
 - **Start with Windows**, for a console-like experience from boot.
 - **Themes**: custom sounds, music, font and wallpaper without touching the code.
@@ -92,8 +92,8 @@ Restart Lumen after making changes. Theme files stay on your computer and are no
 | `src-tauri/src/local.rs` | scans game folders and builds manually added games |
 | `src-tauri/src/art.rs` | extracts executable icons and looks local games up on Steam for cover art |
 | `src-tauri/src/launcher.rs` | launches via `steam://rungameid/…`, `shell:AppsFolder\…` or the game's executable, then watches the processes in the game's folder |
-| `src-tauri/src/guide.rs` | reads the Guide button via `XInputGetStateEx` |
-| `src-tauri/src/pads.rs` | reads controller battery (HID for Sony, XInput for Xbox) |
+| `src-tauri/src/guide.rs` | reads the Guide button via `XInputGetStateEx` and brings Lumen to the front |
+| `src-tauri/src/pads.rs` | reads controller battery (HID for Sony, XInput for Xbox) and the PS button over HID |
 | `src-tauri/src/platform.rs` | Windows calls: processes, foreground, registry, power, PC battery |
 | `ui/js/app.js` | the interface: row, library, menus, navigation |
 | `ui/js/input.js` | keyboard, gamepad, mouse wheel |
@@ -104,7 +104,6 @@ Data (the scanned library, playtime, settings, manually added games and cached a
 ## Known limitations
 
 - **Older Xbox (UWP) games** without `MicrosoftGame.config` are not detected. Most current Game Pass titles are GDK and do show up.
-- **DualSense**: navigating the interface works natively, but the PS button opens the quick menu only if the controller is mapped as XInput (Steam Input or DS4Windows).
 - **The quick menu over a game** appears on top of games running in borderless windowed mode. Games in exclusive fullscreen are minimized when Lumen comes to the foreground.
 - A Steam game that starts another launcher of its own (EA, Ubisoft) may run from a different folder; its playtime is then not recorded correctly.
 - **Local games**: the main executable is picked heuristically. If the wrong one is chosen, add the game manually with the right executable; it replaces the automatic entry.
