@@ -739,6 +739,7 @@ function openSettings() {
         desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : 'Adaugă folderele cu jocuri din afara Steam și Xbox',
         action: openGameFolders,
       },
+      { label: 'Jocuri ascunse', desc: 'Readu în bibliotecă jocurile eliminate', action: openHiddenGames },
       { label: 'Deschide folderul temei', desc: 'Sunete, muzică, font și fundal personalizat', action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
       { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
     ],
@@ -758,16 +759,46 @@ async function addGame() {
   }
 }
 
+// Jocurile adăugate manual se șterg de tot; celelalte doar se ascund și pot fi readuse din Setări.
 function removeGame(g) {
-  confirmPanel(`Elimini ${g.name}?`, 'Jocul dispare doar din Lumen; fișierele lui rămân pe disc.', 'Elimină din bibliotecă', async () => {
+  const manual = g.id.startsWith('manual:');
+  const note = manual
+    ? 'Jocul dispare doar din Lumen; fișierele lui rămân pe disc.'
+    : 'Jocul rămâne instalat. Îl poți readuce din Setări → Jocuri ascunse.';
+  confirmPanel(`Elimini ${g.name}?`, note, 'Elimină din bibliotecă', async () => {
     try {
       await call('remove_game', { id: g.id });
       closeAll();
-      rescan(false);
+      // Scoatem jocul pe loc, fără o scanare completă.
+      S.games = S.games.filter((x) => x.id !== g.id);
+      renderRow();
+      renderLibrary();
+      toast(`${g.name} a fost eliminat din bibliotecă.`);
     } catch (e) {
       toast(String(e), 'error');
     }
   });
+}
+
+async function openHiddenGames() {
+  let hidden = [];
+  try { hidden = (await call('hidden_games')) || []; } catch (e) { toast(String(e), 'error'); return; }
+  pushOverlay(listPanel({
+    title: 'Jocuri ascunse',
+    note: hidden.length ? 'Alege un joc ca să-l readuci în bibliotecă.' : 'Nu ai ascuns niciun joc.',
+    items: hidden.map((h) => ({
+      label: h.name,
+      desc: 'Readu în bibliotecă',
+      action: async () => {
+        try {
+          await call('restore_game', { id: h.id });
+          closeAll();
+          toast(`${h.name} revine în bibliotecă.`);
+          rescan(false);
+        } catch (e) { toast(String(e), 'error'); }
+      },
+    })),
+  }));
 }
 
 // Fiecare subfolder al unui folder de aici apare în bibliotecă ca joc „Local”.
@@ -830,7 +861,7 @@ function openGameOptions(g) {
     { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
     { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
   ];
-  if (g.id.startsWith('manual:') && !running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
+  if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
   pushOverlay(listPanel({ title: g.name, note: `${SOURCE[g.source]} · ${relTime(stat(g.id).lastPlayed)}`, items }));
 }
 
