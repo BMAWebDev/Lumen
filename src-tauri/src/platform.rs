@@ -69,6 +69,15 @@ pub(crate) mod win {
     }
 
     #[repr(C)]
+    #[derive(Default)]
+    pub struct Rect {
+        pub left: i32,
+        pub top: i32,
+        pub right: i32,
+        pub bottom: i32,
+    }
+
+    #[repr(C)]
     pub struct SystemPowerStatus {
         pub ac_line_status: u8,
         pub battery_flag: u8,
@@ -97,6 +106,12 @@ pub(crate) mod win {
         pub fn SetForegroundWindow(hwnd: isize) -> i32;
         pub fn BringWindowToTop(hwnd: isize) -> i32;
         pub fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
+        pub fn EnumWindows(cb: extern "system" fn(isize, isize) -> i32, lparam: isize) -> i32;
+        pub fn GetWindowThreadProcessId(hwnd: isize, pid: *mut u32) -> u32;
+        pub fn IsWindowVisible(hwnd: isize) -> i32;
+        pub fn IsIconic(hwnd: isize) -> i32;
+        pub fn GetWindow(hwnd: isize, cmd: u32) -> isize;
+        pub fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
         pub fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
     }
 
@@ -143,11 +158,24 @@ pub fn process_paths() -> Vec<(u32, String)> {
     Vec::new()
 }
 
+/// Folderul real din spatele junction-urilor. Jocurile Xbox mutate pe alt disc au
+/// `C:\Program Files\WindowsApps\…` → `D:\WindowsApps\…` → `D:\Jocuri\<joc>\Content`,
+/// iar Windows raportează procesele cu calea finală.
+fn real_dir(dir: &str) -> Option<String> {
+    let p = std::fs::canonicalize(dir).ok()?.to_string_lossy().into_owned();
+    let p = match p.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => p.strip_prefix(r"\\?\").unwrap_or(&p).to_string(),
+    };
+    (util::norm_path(&p) != util::norm_path(dir)).then_some(p)
+}
+
 /// PID-urile proceselor pornite din folderul unui joc.
 pub fn procs_under(dir: &str) -> Vec<u32> {
+    let real = real_dir(dir);
     process_paths()
         .into_iter()
-        .filter(|(_, path)| util::is_inside(path, dir))
+        .filter(|(_, path)| util::is_inside(path, dir) || real.as_deref().is_some_and(|r| util::is_inside(path, r)))
         .map(|(pid, _)| pid)
         .collect()
 }
@@ -189,6 +217,56 @@ pub fn bring_to_front(w: &tauri::WebviewWindow) {
     }
     let _ = w.set_focus();
     let _ = w.set_fullscreen(true);
+}
+
+/// Readuce în prim-plan fereastra principală a unuia dintre procese (cea mai mare
+/// fereastră vizibilă, fără proprietar), restaurând-o dacă e minimizată.
+/// Întoarce `false` dacă procesele nu au nicio fereastră.
+#[cfg(windows)]
+pub fn focus_window_of(pids: &[u32]) -> bool {
+    use win::*;
+    struct Search<'a> {
+        pids: &'a [u32],
+        best: isize,
+        area: i64,
+    }
+    extern "system" fn visit(hwnd: isize, lparam: isize) -> i32 {
+        // SAFETY: `lparam` e adresa lui `Search`, validă pe durata lui EnumWindows.
+        let s = unsafe { &mut *(lparam as *mut Search) };
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        const GW_OWNER: u32 = 4;
+        if s.pids.contains(&pid) && unsafe { IsWindowVisible(hwnd) } != 0 && unsafe { GetWindow(hwnd, GW_OWNER) } == 0 {
+            let mut r = Rect::default();
+            unsafe { GetWindowRect(hwnd, &mut r) };
+            // O fereastră minimizată are dreptunghiul mic, dar tot e un candidat.
+            let area = ((r.right - r.left) as i64 * (r.bottom - r.top) as i64).max(1);
+            if area > s.area {
+                s.best = hwnd;
+                s.area = area;
+            }
+        }
+        1
+    }
+    let mut s = Search { pids, best: 0, area: 0 };
+    unsafe { EnumWindows(visit, &mut s as *mut Search as isize) };
+    if s.best == 0 {
+        return false;
+    }
+    unsafe {
+        // Ca la `bring_to_front`: o apăsare de Alt deblochează SetForegroundWindow.
+        keybd_event(0x12, 0, 0, 0);
+        keybd_event(0x12, 0, 2, 0);
+        ShowWindow(s.best, if IsIconic(s.best) != 0 { 9 } else { 5 }); // SW_RESTORE / SW_SHOW
+        BringWindowToTop(s.best);
+        SetForegroundWindow(s.best);
+    }
+    true
+}
+
+#[cfg(not(windows))]
+pub fn focus_window_of(_pids: &[u32]) -> bool {
+    false
 }
 
 // ---------------------------------------------------------------------------

@@ -177,7 +177,12 @@ fn cancel_launch(app: AppHandle) {
 }
 
 #[tauri::command]
-fn close_game(app: AppHandle) -> Result<(), String> {
+fn resume_game(app: AppHandle) -> Result<(), String> {
+    launcher::resume(&app)
+}
+
+#[tauri::command]
+fn close_game(app: AppHandle) -> Result<bool, String> {
     launcher::close_running(&app)
 }
 
@@ -376,6 +381,7 @@ fn main() {
             launch_game,
             cancel_launch,
             close_game,
+            resume_game,
             set_setting,
             add_game_folder,
             remove_game_folder,

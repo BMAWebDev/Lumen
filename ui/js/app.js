@@ -327,9 +327,9 @@ function renderDetail(force) {
 
       const isRunning = S.running?.id === g.id;
       S.actions.push({
-        label: isRunning ? 'Rulează' : 'Joacă',
-        cls: 'primary' + (isRunning ? ' muted' : ''),
-        icon: isRunning ? '' : icons.play,
+        label: isRunning ? (S.running.started ? 'Înapoi la joc' : 'Se pornește') : 'Joacă',
+        cls: 'primary' + (isRunning && !S.running.started ? ' muted' : ''),
+        icon: isRunning && !S.running.started ? '' : icons.play,
         run: () => launch(g),
       });
       S.actions.push({ label: '', aria: 'Mai multe opțiuni', cls: 'round', icon: icons.more, run: () => openGameOptions(g) });
@@ -855,6 +855,7 @@ function applySettings() {
 function openGameOptions(g) {
   const running = S.running?.id === g.id;
   const items = [
+    ...(running && S.running.started ? [{ label: 'Înapoi la joc', action: () => resumeGame() }] : []),
     running
       ? { label: 'Închide jocul', danger: true, action: () => { closeTop(true); askCloseGame(); } }
       : { label: 'Joacă', action: () => { closeTop(true); launch(g); } },
@@ -862,6 +863,9 @@ function openGameOptions(g) {
     { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
   ];
   if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
+  // Jocul pornit se poate închide din opțiunile oricărui joc din bibliotecă.
+  const other = !running && gameById(S.running?.id);
+  if (other) items.unshift({ label: `Închide ${other.name}`, desc: 'Rulează acum', danger: true, action: () => { closeTop(true); askCloseGame(); } });
   pushOverlay(listPanel({ title: g.name, note: `${SOURCE[g.source]} · ${relTime(stat(g.id).lastPlayed)}`, items }));
 }
 
@@ -869,7 +873,17 @@ function askCloseGame() {
   const g = gameById(S.running?.id);
   if (!g) return;
   confirmPanel(`Închizi ${g.name}?`, 'Progresul nesalvat se va pierde.', 'Închide jocul', async () => {
-    try { await call('close_game'); } catch (e) { toast(String(e), 'error'); }
+    try {
+      // `true`: lansarea nu fusese încă detectată, deci nu vine niciun `game-exited`.
+      if (await call('close_game')) {
+        S.running = null;
+        hideLaunch();
+        closeAll();
+        updateRunning();
+        applySettings();
+        toast(`${g.name} a fost închis.`);
+      }
+    } catch (e) { toast(String(e), 'error'); }
   });
 }
 
@@ -892,6 +906,7 @@ function openQuick() {
     { label: 'Acasă', icon: icons.home, run: () => { closeAll(); showView('home'); } },
     { label: 'Bibliotecă', icon: icons.library, run: () => { closeAll(); showView('library'); } },
   ];
+  if (running && S.running.started) cards.unshift({ label: 'Înapoi la joc', icon: icons.play, run: () => resumeGame() });
   if (running) cards.push({ label: `Închide ${running.name}`, icon: icons.close, danger: true, run: () => askCloseGame() });
   cards.push(
     { label: 'Reîmprospătează biblioteca', icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
@@ -924,6 +939,16 @@ function openQuick() {
       else if (a === 'back' || a === 'menu' || a === 'up') closeTop();
     },
   });
+}
+
+/** Readuce jocul pornit în față; Lumen se minimizează. */
+async function resumeGame() {
+  try {
+    await call('resume_game');
+    closeAll();
+  } catch (e) {
+    toast(String(e), 'error');
+  }
 }
 
 /** Ecranul afișat cât timp jocul pornește. */
@@ -966,7 +991,9 @@ function hideLaunch() {
 // ======================================================================
 async function launch(g) {
   if (S.running) {
-    if (S.running.id === g.id) toast(`${g.name} rulează deja.`);
+    // „Joacă” pe jocul deja pornit te duce înapoi în el.
+    if (S.running.id === g.id && S.running.started) resumeGame();
+    else if (S.running.id === g.id) toast(`${g.name} se pornește.`);
     else toast(`Închide mai întâi ${gameById(S.running.id)?.name || 'jocul curent'}.`, 'error');
     return;
   }
@@ -1176,7 +1203,9 @@ async function boot() {
   on('library', onLibrary);
   on('guide', () => {
     const top = stack[stack.length - 1];
-    if (top?.type === 'quick') closeTop(); else openQuick();
+    // Ca pe consolă: a doua apăsare pe PS / Guide te duce înapoi în joc.
+    if (top?.type === 'quick') { if (S.running?.started) resumeGame(); else closeTop(); }
+    else openQuick();
   });
   on('game-started', ({ id }) => {
     S.running = { id, started: true };

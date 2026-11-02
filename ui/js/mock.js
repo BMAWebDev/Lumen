@@ -120,9 +120,15 @@ export async function invoke(cmd, args) {
     case 'cancel_launch':
       if (running && !running.started) running = null;
       return;
-    case 'close_game':
-      if (running) { const id = running.id; running = null; setTimeout(() => emit('game-exited', { id, seconds: 1260, detected: true }), 400); }
+    case 'resume_game':
+      if (!running?.started) throw new Error('Niciun joc nu rulează.');
       return;
+    case 'close_game':
+      if (!running) return false;
+      // Lansare încă nedetectată: interfața își curăță singură starea.
+      if (!running.started) { running = null; return true; }
+      { const id = running.id; running = null; setTimeout(() => emit('game-exited', { id, seconds: 1260, detected: true }), 400); }
+      return false;
     case 'set_setting':
       settings[args.key] = args.value;
       return { ...settings };

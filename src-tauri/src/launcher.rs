@@ -69,20 +69,42 @@ pub fn cancel(app: &AppHandle) {
     };
 }
 
-/// Închide forțat toate procesele jocului care rulează.
-pub fn close_running(app: &AppHandle) -> Result<(), String> {
+/// Închide forțat toate procesele jocului care rulează. Dacă lansarea încă nu fusese
+/// detectată, renunță și la ea și întoarce `true`: interfața își curăță singură starea,
+/// pentru că `watch` nu mai trimite `game-exited` pentru o lansare anulată.
+pub fn close_running(app: &AppHandle) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    let (dir, pending) = {
+        let mut s = state.inner.lock().map_err(|_| "Starea aplicației este blocată.")?;
+        let r = s.running.as_ref().ok_or("Niciun joc nu rulează.")?;
+        let pending = !r.started;
+        let dir = s.games.iter().find(|g| g.id == r.id).map(|g| g.install_dir.clone());
+        if pending || dir.is_none() {
+            s.running = None;
+        }
+        (dir, pending)
+    };
+    if let Some(dir) = &dir {
+        for pid in platform::procs_under(dir) {
+            platform::kill(pid);
+        }
+    }
+    Ok(pending || dir.is_none())
+}
+
+/// Readuce jocul care rulează în prim-plan și minimizează Lumen.
+pub fn resume(app: &AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
     let dir = {
         let s = state.inner.lock().map_err(|_| "Starea aplicației este blocată.")?;
-        let r = s.running.as_ref().ok_or("Niciun joc nu rulează.")?;
-        s.games
-            .iter()
-            .find(|g| g.id == r.id)
-            .map(|g| g.install_dir.clone())
-            .ok_or("Jocul nu a fost găsit.")?
+        let r = s.running.as_ref().filter(|r| r.started).ok_or("Niciun joc nu rulează.")?;
+        s.games.iter().find(|g| g.id == r.id).map(|g| g.install_dir.clone()).ok_or("Jocul nu a fost găsit.")?
     };
-    for pid in platform::procs_under(&dir) {
-        platform::kill(pid);
+    if !platform::focus_window_of(&platform::procs_under(&dir)) {
+        return Err("Fereastra jocului nu a fost găsită.".into());
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.minimize();
     }
     Ok(())
 }
