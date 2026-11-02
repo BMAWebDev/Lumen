@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Permisiuni pentru fereastra principală",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

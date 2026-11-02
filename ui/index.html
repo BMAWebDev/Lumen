@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumen</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="booting" data-view="home" data-zone="row">
+  <div id="bg" aria-hidden="true">
+    <div class="bg-layer"><img alt=""></div>
+    <div class="bg-layer"><img alt=""></div>
+    <div class="bg-shade"></div>
+  </div>
+
+  <header id="topbar">
+    <nav class="tabs">
+      <button id="tab-home" class="tab active">Jocuri</button>
+      <button id="tab-library" class="tab">Bibliotecă</button>
+    </nav>
+    <div class="status">
+      <div id="running-pill" class="running-pill" hidden><i></i><span></span></div>
+      <button id="btn-settings" class="icon-btn" aria-label="Setări"></button>
+      <div id="avatar" class="avatar" aria-hidden="true"></div>
+      <time id="clock"></time>
+    </div>
+  </header>
+
+  <main>
+    <section id="home" class="view">
+      <div id="row" class="row">
+        <div id="row-track" class="row-track"></div>
+        <div id="row-label" class="row-label"></div>
+      </div>
+      <div id="detail" class="detail"></div>
+    </section>
+
+    <section id="library" class="view hidden">
+      <div class="lib-head">
+        <h2>Biblioteca ta</h2>
+        <div id="filters" class="filters"></div>
+        <span id="lib-count" class="lib-count"></span>
+      </div>
+      <div id="grid-wrap" class="grid-wrap">
+        <div id="grid" class="grid"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="scrim" class="scrim"></div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <footer id="hints" class="hints"></footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

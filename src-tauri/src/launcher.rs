@@ -1,0 +1,164 @@
+//! Pornirea jocurilor și urmărirea lor până la închidere.
+
+use std::thread;
+use std::time::{Duration, Instant};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::model::{AppState, Game, Running};
+use crate::{platform, store, util};
+
+/// Cât așteptăm ca jocul să apară după lansare (Steam poate avea nevoie să pornească întâi).
+const START_TIMEOUT: Duration = Duration::from_secs(180);
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GameEvent {
+    pub id: String,
+    pub seconds: u64,
+    pub detected: bool,
+}
+
+pub fn launch(app: &AppHandle, id: &str) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let (game, minimize) = {
+        let mut s = state.inner.lock().map_err(|_| "Starea aplicației este blocată.")?;
+        if let Some(r) = &s.running {
+            if r.id == id {
+                return Ok(());
+            }
+            return Err("Rulează deja un alt joc.".into());
+        }
+        let game = s
+            .games
+            .iter()
+            .find(|g| g.id == id)
+            .cloned()
+            .ok_or("Jocul nu mai există în bibliotecă.")?;
+        s.running = Some(Running { id: id.to_string(), started: false });
+        let stat = s.stats.entry(id.to_string()).or_default();
+        stat.last_played = util::now();
+        stat.launches += 1;
+        store::save(&s.data_dir, "stats.json", &s.stats);
+        (game, s.settings.minimize_on_launch)
+    };
+
+    if let Err(e) = platform::open_uri(&game.launch_uri) {
+        clear(app, id);
+        return Err(format!("Jocul nu a putut fi pornit: {e}"));
+    }
+
+    let app = app.clone();
+    thread::spawn(move || watch(app, game, minimize));
+    Ok(())
+}
+
+/// Renunță la o lansare care încă nu a fost detectată.
+pub fn cancel(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    if let Ok(mut s) = state.inner.lock() {
+        if s.running.as_ref().is_some_and(|r| !r.started) {
+            s.running = None;
+        }
+    };
+}
+
+/// Închide forțat toate procesele jocului care rulează.
+pub fn close_running(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let dir = {
+        let s = state.inner.lock().map_err(|_| "Starea aplicației este blocată.")?;
+        let r = s.running.as_ref().ok_or("Niciun joc nu rulează.")?;
+        s.games
+            .iter()
+            .find(|g| g.id == r.id)
+            .map(|g| g.install_dir.clone())
+            .ok_or("Jocul nu a fost găsit.")?
+    };
+    for pid in platform::procs_under(&dir) {
+        platform::kill(pid);
+    }
+    Ok(())
+}
+
+fn is_current(app: &AppHandle, id: &str) -> bool {
+    let state = app.state::<AppState>();
+    let s = state.inner.lock();
+    s.map(|s| s.running.as_ref().is_some_and(|r| r.id == id)).unwrap_or(false)
+}
+
+fn clear(app: &AppHandle, id: &str) {
+    let state = app.state::<AppState>();
+    if let Ok(mut s) = state.inner.lock() {
+        if s.running.as_ref().is_some_and(|r| r.id == id) {
+            s.running = None;
+        }
+    };
+}
+
+fn watch(app: AppHandle, game: Game, minimize: bool) {
+    // 1. Așteptăm să apară un proces pornit din folderul jocului.
+    let deadline = Instant::now() + START_TIMEOUT;
+    loop {
+        thread::sleep(Duration::from_millis(1500));
+        if !is_current(&app, &game.id) {
+            return; // lansare anulată
+        }
+        if !platform::procs_under(&game.install_dir).is_empty() {
+            break;
+        }
+        if Instant::now() > deadline {
+            clear(&app, &game.id);
+            let _ = app.emit("game-exited", GameEvent { id: game.id.clone(), seconds: 0, detected: false });
+            return;
+        }
+    }
+
+    {
+        let state = app.state::<AppState>();
+        if let Ok(mut s) = state.inner.lock() {
+            if let Some(r) = s.running.as_mut() {
+                r.started = true;
+            }
+        };
+    }
+    let _ = app.emit("game-started", GameEvent { id: game.id.clone(), seconds: 0, detected: true });
+    if minimize {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.minimize();
+        }
+    }
+
+    // 2. Jocul rulează. Considerăm că s-a închis după 3 verificări la rând fără
+    //    procese (unele jocuri trec printr-un launcher și își schimbă executabilul).
+    let start = Instant::now();
+    let mut misses = 0;
+    loop {
+        thread::sleep(Duration::from_secs(2));
+        if platform::procs_under(&game.install_dir).is_empty() {
+            misses += 1;
+            if misses >= 3 {
+                break;
+            }
+        } else {
+            misses = 0;
+        }
+    }
+    let seconds = start.elapsed().as_secs().saturating_sub(4);
+
+    {
+        let state = app.state::<AppState>();
+        if let Ok(mut s) = state.inner.lock() {
+            let stat = s.stats.entry(game.id.clone()).or_default();
+            stat.playtime_sec += seconds;
+            stat.last_played = util::now();
+            store::save(&s.data_dir, "stats.json", &s.stats);
+        };
+    }
+    clear(&app, &game.id);
+    let _ = app.emit("game-exited", GameEvent { id: game.id.clone(), seconds, detected: true });
+    if let Some(w) = app.get_webview_window("main") {
+        platform::bring_to_front(&w);
+    };
+}
