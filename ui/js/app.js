@@ -57,7 +57,7 @@ function bytes(n) {
   return gb >= 1 ? `${gb.toFixed(gb >= 100 ? 0 : 1).replace('.', ',')} GB` : `${Math.round(n / 1024 ** 2)} MB`;
 }
 
-const SOURCE = { steam: 'Steam', xbox: 'Xbox' };
+const SOURCE = { steam: 'Steam', xbox: 'Xbox', local: 'Local' };
 
 /** Încearcă pe rând fiecare imagine candidată până se încarcă una. */
 function setSrc(img, list, onFail) {
@@ -125,6 +125,7 @@ const S = {
   libIndex: 0,
   gridScroll: 0,
   device: 'keyboard',
+  pad: 'xbox',
   booting: true,
 };
 const stack = []; // suprapuneri deschise (meniu rapid, panouri, lansare)
@@ -195,6 +196,12 @@ function tileArt(game) {
   const art = el('div', 'art');
   const ph = el('div', 'ph', esc(game.name));
   ph.style.setProperty('--h', hue(game.id));
+  // Jocurile locale fără copertă primesc iconița executabilului, centrată.
+  if (game.icon) {
+    const ic = el('i', 'ph-icon');
+    ic.style.backgroundImage = `url("${fileUrl(game.icon).replace(/"/g, '%22')}")`;
+    ph.append(ic);
+  }
   const img = new Image();
   img.alt = '';
   img.decoding = 'async';
@@ -382,7 +389,7 @@ function renderActions() {
 // ======================================================================
 // Biblioteca
 // ======================================================================
-const FILTERS = [['all', 'Toate'], ['steam', 'Steam'], ['xbox', 'Xbox']];
+const FILTERS = [['all', 'Toate'], ['steam', 'Steam'], ['xbox', 'Xbox'], ['local', 'Locale']];
 const grid = $('#grid');
 const filtersEl = $('#filters');
 
@@ -424,7 +431,10 @@ function renderLibrary(keepId) {
     return t;
   });
   if (!S.libList.length) {
-    grid.appendChild(el('div', 'empty', S.games.length ? 'Niciun joc pentru acest filtru.' : 'Biblioteca e goală. Instalează un joc din Steam sau din aplicația Xbox, apoi reîmprospătează biblioteca din meniul rapid.'));
+    const noFolders = S.filter === 'local' && !S.settings.gameFolders?.length;
+    grid.appendChild(el('div', 'empty', noFolders
+      ? 'Nu ai adăugat încă jocuri locale. Deschide Setări → Adaugă un joc, sau Setări → Foldere cu jocuri.'
+      : S.games.length ? 'Niciun joc pentru acest filtru.' : 'Biblioteca e goală. Instalează un joc din Steam sau din aplicația Xbox, apoi reîmprospătează biblioteca din meniul rapid.'));
   }
   const n = S.libList.length;
   $('#lib-count').textContent = n ? plural(n, 'Un joc', 'jocuri') : '';
@@ -559,6 +569,32 @@ function libraryAction(a) {
   }
 }
 
+// L2 / R2 (Home / End): salt la primul sau ultimul joc din rând ori din bibliotecă.
+function jumpToEnd(last) {
+  if (S.view === 'home') {
+    const n = S.rowEls.length;
+    if (!n) return;
+    const ni = last ? n - 1 : 0;
+    const moved = S.zone !== 'row' || ni !== S.rowIndex;
+    S.zone = 'row';
+    if (!moved) { bump(S.rowEls[ni], last ? 1 : -1); return; }
+    S.rowIndex = ni;
+    sound.play('move');
+    onRowFocus();
+  } else {
+    const n = S.libList.length;
+    if (!n) return;
+    const ni = last ? n - 1 : 0;
+    const moved = S.zone !== 'grid' || ni !== S.libIndex;
+    S.zone = 'grid';
+    if (!moved) { bump(S.libEls[ni], last ? 1 : -1); return; }
+    S.libIndex = ni;
+    sound.play('move');
+    updateFocus();
+    scrollGrid();
+  }
+}
+
 function goTabs(index) {
   S.zone = 'tabs';
   S.tabIndex = index;
@@ -592,6 +628,7 @@ function onAction(a) {
     if (v !== S.view) { sound.play('move'); showView(v); }
     return;
   }
+  if (a === 'first' || a === 'last') { jumpToEnd(a === 'last'); return; }
   if (S.zone === 'tabs') tabsAction(a);
   else if (S.view === 'home') homeAction(a);
   else libraryAction(a);
@@ -696,8 +733,75 @@ function openSettings() {
       toggle('music', 'Muzică de fundal', S.theme.music ? '' : 'Adaugă un fișier music.mp3 în folderul temei'),
       toggle('onlineArt', 'Imagini online pentru Steam', 'Descarcă coperțile care lipsesc din cache-ul Steam'),
       toggle('reduceMotion', 'Reduce animațiile'),
+      { label: 'Adaugă un joc', desc: 'Alege executabilul (.exe) unui joc din afara Steam și Xbox', action: addGame },
+      {
+        label: 'Foldere cu jocuri',
+        desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : 'Adaugă folderele cu jocuri din afara Steam și Xbox',
+        action: openGameFolders,
+      },
       { label: 'Deschide folderul temei', desc: 'Sunete, muzică, font și fundal personalizat', action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
       { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
+    ],
+  }));
+}
+
+// Numele, iconița și (dacă jocul e și pe Steam) coperta se completează automat la reîmprospătare.
+async function addGame() {
+  try {
+    const name = await call('add_game');
+    if (!name) return;
+    closeAll();
+    toast(`${name} a fost adăugat. Se caută imaginile…`);
+    rescan(false);
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+}
+
+function removeGame(g) {
+  confirmPanel(`Elimini ${g.name}?`, 'Jocul dispare doar din Lumen; fișierele lui rămân pe disc.', 'Elimină din bibliotecă', async () => {
+    try {
+      await call('remove_game', { id: g.id });
+      closeAll();
+      rescan(false);
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  });
+}
+
+// Fiecare subfolder al unui folder de aici apare în bibliotecă ca joc „Local”.
+function openGameFolders() {
+  const reopen = () => { closeAll(); openSettings(); openGameFolders(); };
+  const folders = S.settings.gameFolders || [];
+  pushOverlay(listPanel({
+    title: 'Foldere cu jocuri',
+    note: 'Fiecare subfolder e considerat un joc. Jocurile Xbox din aceste foldere sunt deja importate.',
+    items: [
+      ...folders.map((path) => ({
+        label: path,
+        desc: 'Elimină folderul',
+        action: () => confirmPanel('Elimini folderul?', path, 'Elimină', async () => {
+          try {
+            S.settings = await call('remove_game_folder', { path });
+            reopen();
+            rescan(true);
+          } catch (e) { toast(String(e), 'error'); }
+        }),
+      })),
+      {
+        label: 'Adaugă folder',
+        desc: 'Se deschide fereastra Windows de alegere a folderului',
+        action: async () => {
+          try {
+            const settings = await call('add_game_folder');
+            if (!settings) return;
+            S.settings = settings;
+            reopen();
+            rescan(true);
+          } catch (e) { toast(String(e), 'error'); }
+        },
+      },
     ],
   }));
 }
@@ -726,6 +830,7 @@ function openGameOptions(g) {
     { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
     { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
   ];
+  if (g.id.startsWith('manual:') && !running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
   pushOverlay(listPanel({ title: g.name, note: `${SOURCE[g.source]} · ${relTime(stat(g.id).lastPlayed)}`, items }));
 }
 
@@ -864,12 +969,26 @@ function toast(msg, kind = 'info') {
   setTimeout(() => { t.classList.remove('in'); setTimeout(() => t.remove(), 420); }, 4800);
 }
 
+// Simbolurile PlayStation, desenate cu culorile lor clasice.
+const psSvg = (color, body) =>
+  `<svg viewBox="0 0 16 16" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+// Meniul rapid e pe butonul din stânga (View / Create), opțiunile jocului pe cel din dreapta (☰).
+// Y / △ deschid în continuare opțiunile, dar indiciul arată butonul din dreapta.
 const GLYPHS = {
-  gamepad: { confirm: 'A', back: 'B', menu: '☰', options: 'Y' },
+  xbox: {
+    confirm: 'A', back: 'B', options: '☰',
+    menu: psSvg('currentColor', '<rect x="2.5" y="2.5" width="8" height="8" rx="1.5"/><path d="M6 13.5h6a1.5 1.5 0 0 0 1.5-1.5V6"/>'),
+  },
+  playstation: {
+    confirm: psSvg('#7cb2ff', '<path d="m4 4 8 8M12 4l-8 8"/>'),
+    back: psSvg('#ff6b81', '<circle cx="8" cy="8" r="4.6"/>'),
+    options: '☰',
+    menu: psSvg('currentColor', '<path d="M8 13V5M4.5 12 3 6M11.5 12 13 6"/>'),
+  },
   keyboard: { confirm: 'Enter', back: 'Esc', menu: 'Tab', options: 'O' },
 };
 function updateHints() {
-  const g = GLYPHS[S.device === 'gamepad' ? 'gamepad' : 'keyboard'];
+  const g = GLYPHS[S.device === 'gamepad' ? S.pad : 'keyboard'];
   const top = stack[stack.length - 1];
   let list;
   if (top?.type === 'launch') list = S.running?.started ? [['menu', 'Meniu']] : [['back', 'Anulează'], ['menu', 'Meniu']];
@@ -882,6 +1001,44 @@ function updateHints() {
 
 function tickClock() {
   $('#clock').textContent = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Bateria apare doar pe dispozitivele care au una (laptop, consolă portabilă).
+function batteryIcon(percent, charging) {
+  const w = Math.round((clamp(percent, 0, 100) / 100) * 22 * 10) / 10;
+  const bolt = charging ? '<path d="M15 2.5 11 9h3.5L12 15.5" fill="none" stroke="var(--void)" stroke-width="3.2" stroke-linejoin="round"/><path d="M15 2.5 11 9h3.5L12 15.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' : '';
+  return `<svg viewBox="0 0 34 18" aria-hidden="true">
+    <rect x="1" y="1" width="28" height="16" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".85"/>
+    <rect x="30.5" y="6" width="2.5" height="6" rx="1" fill="currentColor" opacity=".85"/>
+    <rect x="4" y="4" width="${w}" height="10" rx="1.6" fill="currentColor"/>${bolt}
+  </svg>`;
+}
+
+async function tickBattery() {
+  let b = null;
+  try { b = await call('battery'); } catch { /* fără informații despre baterie */ }
+  const box = $('#battery');
+  box.hidden = !b;
+  if (!b) return;
+  const charging = b.charging || b.plugged;
+  box.classList.toggle('charging', charging);
+  box.classList.toggle('low', !charging && b.percent <= 20);
+  $('.batt-icon', box).innerHTML = batteryIcon(b.percent, charging);
+  $('.batt-pct', box).textContent = `${b.percent}%`;
+  box.setAttribute('aria-label', `Baterie ${b.percent}%${charging ? ', se încarcă' : ''}`);
+}
+
+// Bateria controlerelor: DualSense/DualShock prin HID, Xbox prin XInput.
+async function tickPads() {
+  let pads = [];
+  try { pads = (await call('pad_batteries')) || []; } catch { /* fără controlere */ }
+  $('#pad-batteries').innerHTML = pads.map((p) => {
+    const cls = p.charging ? ' charging' : p.percent <= 20 ? ' low' : '';
+    const name = p.kind === 'playstation' ? 'Controler PlayStation' : 'Controler Xbox';
+    return `<div class="battery pad${cls}" aria-label="${name}: ${p.percent}%${p.charging ? ', se încarcă' : ''}">
+      <span class="pad-icon">${icons.gamepad}</span><span class="batt-icon">${batteryIcon(p.percent, p.charging)}</span><span class="batt-pct">${p.percent}%</span>
+    </div>`;
+  }).join('');
 }
 
 // ======================================================================
@@ -937,12 +1094,19 @@ async function boot() {
   $('#btn-settings').innerHTML = icons.gear;
   tickClock();
   setInterval(tickClock, 10_000);
+  tickBattery();
+  setInterval(tickBattery, 30_000);
+  tickPads();
+  setInterval(tickPads, 30_000);
+  // Controlerul abia conectat are nevoie de o clipă până răspunde prin HID.
+  for (const ev of ['gamepadconnected', 'gamepaddisconnected']) window.addEventListener(ev, () => setTimeout(tickPads, 800));
 
   const input = createInput({
     onAction,
-    onDevice: (d) => { S.device = d; document.body.classList.toggle('hide-cursor', d === 'gamepad'); updateHints(); },
+    onDevice: (d, pad) => { S.device = d; S.pad = pad; document.body.classList.toggle('hide-cursor', d === 'gamepad'); updateHints(); },
   });
   S.device = input.device;
+  S.pad = input.pad;
 
   // Cursorul dispare după câteva secunde de inactivitate.
   let cursorTimer = null;

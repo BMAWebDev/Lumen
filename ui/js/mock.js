@@ -82,6 +82,7 @@ const DATA = [
   ['Cinder & Sage', 'xbox', 15, 340, 2, 0, 0, false],
   ['Paper Skies', 'steam', 205, 245, 3, 0, 0, true],
   ['Moth & Mirror', 'steam', 290, 330, 1, 0, 0, false],
+  ['Driftwood Atlas', 'local', 35, 200, 0, 0, 0, false],
 ];
 
 const games = DATA.map(([name, source, h1, h2, v, ago, play, hasLogo], i) => ({
@@ -99,7 +100,7 @@ const stats = {};
 DATA.forEach(([, , , , , ago, play], i) => {
   if (ago) stats[games[i].id] = { playtimeSec: play, lastPlayed: now - ago, launches: 3 + i };
 });
-const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false };
+const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
 let running = null;
 
 export async function invoke(cmd, args) {
@@ -123,8 +124,33 @@ export async function invoke(cmd, args) {
     case 'set_setting':
       settings[args.key] = args.value;
       return { ...settings };
+    case 'add_game_folder':
+      if (!settings.gameFolders.includes('D:\\Jocuri')) settings.gameFolders.push('D:\\Jocuri');
+      return { ...settings, gameFolders: [...settings.gameFolders] };
+    case 'remove_game_folder':
+      settings.gameFolders = settings.gameFolders.filter((f) => f !== args.path);
+      return { ...settings, gameFolders: [...settings.gameFolders] };
+    case 'add_game': {
+      // Un joc adăugat manual, fără copertă, doar cu iconița executabilului.
+      if (games.some((g) => g.id === 'manual:lantern')) throw new Error('Paper Lantern e deja în bibliotecă.');
+      games.push({
+        id: 'manual:lantern', source: 'local', name: 'Paper Lantern', installDir: 'D:\\Jocuri\\Paper Lantern',
+        launchUri: '', launchArgs: [], cover: [], hero: [], logo: [], sizeBytes: 3.2e9,
+        icon: uri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="8" y="8" width="48" height="48" rx="12" fill="#f5b84a"/><path d="M32 16c8 8 10 16 0 32-10-16-8-24 0-32z" fill="#7a3a00"/></svg>'),
+      });
+      return 'Paper Lantern';
+    }
+    case 'remove_game': {
+      const i = games.findIndex((g) => g.id === args.id);
+      if (i >= 0) games.splice(i, 1);
+      return;
+    }
     case 'theme_file':
       throw new Error('fără temă');
+    case 'battery':
+      return { percent: 64, charging: false, plugged: false };
+    case 'pad_batteries':
+      return [{ kind: 'playstation', percent: 75, charging: false }];
     default:
       return null;
   }

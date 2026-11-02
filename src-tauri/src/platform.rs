@@ -68,6 +68,16 @@ pub(crate) mod win {
         pub exe_file: [u16; 260],
     }
 
+    #[repr(C)]
+    pub struct SystemPowerStatus {
+        pub ac_line_status: u8,
+        pub battery_flag: u8,
+        pub battery_life_percent: u8,
+        pub system_status_flag: u8,
+        pub battery_life_time: u32,
+        pub battery_full_life_time: u32,
+    }
+
     #[link(name = "kernel32")]
     extern "system" {
         pub fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> HANDLE;
@@ -79,6 +89,7 @@ pub(crate) mod win {
         pub fn CloseHandle(h: HANDLE) -> i32;
         pub fn LoadLibraryW(name: *const u16) -> HANDLE;
         pub fn GetProcAddress(module: HANDLE, name: *const u8) -> *const c_void;
+        pub fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
     }
 
     #[link(name = "user32")]
@@ -215,6 +226,35 @@ pub fn steam_root() -> Option<PathBuf> {
     std::env::var_os("LUMEN_STEAM_ROOT").map(PathBuf::from)
 }
 
+/// Pornește un executabil din folderul lui (multe jocuri își caută fișierele relativ la el).
+pub fn run_exe(exe: &str, args: &[String]) -> Result<(), String> {
+    let path = std::path::Path::new(exe);
+    if !path.is_file() {
+        return Err("Executabilul jocului nu mai există.".into());
+    }
+    let mut cmd = Command::new(path);
+    cmd.args(args);
+    if let Some(dir) = path.parent() {
+        cmd.current_dir(dir);
+    }
+    match cmd.spawn() {
+        Ok(_) => Ok(()),
+        // 740: jocul cere drepturi de administrator; îl pornim prin UAC.
+        #[cfg(windows)]
+        Err(e) if e.raw_os_error() == Some(740) => {
+            let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
+            let dir = path.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default();
+            let mut script = format!("Start-Process -FilePath {} -WorkingDirectory {} -Verb RunAs", q(exe), q(&dir));
+            if !args.is_empty() {
+                let list: Vec<String> = args.iter().map(|a| q(a)).collect();
+                script.push_str(&format!(" -ArgumentList @({})", list.join(",")));
+            }
+            powershell(&script).map(|_| ())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 pub fn open_uri(uri: &str) -> Result<(), String> {
     #[cfg(windows)]
     let program = "explorer.exe";
@@ -263,6 +303,38 @@ pub fn set_autostart(_on: bool) -> Result<(), String> {
 // ---------------------------------------------------------------------------
 // Alimentare
 // ---------------------------------------------------------------------------
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Battery {
+    pub percent: u8,
+    pub charging: bool,
+    pub plugged: bool,
+}
+
+/// Starea bateriei, sau `None` pe un PC fără baterie.
+#[cfg(windows)]
+pub fn battery() -> Option<Battery> {
+    use win::*;
+    let mut st: SystemPowerStatus = unsafe { std::mem::zeroed() };
+    if unsafe { GetSystemPowerStatus(&mut st) } == 0 {
+        return None;
+    }
+    // 128 = fără baterie, 255 = stare necunoscută.
+    if st.battery_flag & 128 != 0 || st.battery_flag == 255 || st.battery_life_percent > 100 {
+        return None;
+    }
+    Some(Battery {
+        percent: st.battery_life_percent,
+        charging: st.battery_flag & 8 != 0,
+        plugged: st.ac_line_status == 1,
+    })
+}
+
+#[cfg(not(windows))]
+pub fn battery() -> Option<Battery> {
+    None
+}
 
 pub fn power(action: &str) -> Result<(), String> {
     match action {

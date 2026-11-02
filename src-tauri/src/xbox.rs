@@ -102,6 +102,8 @@ fn parse(out: &str) -> Result<Vec<Game>, String> {
             name,
             install_dir: loc.clone(),
             launch_uri: format!("shell:AppsFolder\\{family}!{app_id}"),
+            launch_args: Vec::new(),
+            icon: None,
             cover,
             hero,
             logo: Vec::new(),

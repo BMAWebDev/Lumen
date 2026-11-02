@@ -1,8 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod art;
 mod guide;
 mod launcher;
+mod local;
 mod model;
+mod pads;
 mod platform;
 mod steam;
 mod store;
@@ -127,7 +130,13 @@ fn scan_library(app: AppHandle) {
     }
     thread::spawn(move || {
         let state = app.state::<AppState>();
-        let online = state.inner.lock().map(|s| s.settings.online_art).unwrap_or(true);
+        let Ok((online, folders, data_dir)) = state
+            .inner
+            .lock()
+            .map(|s| (s.settings.online_art, s.settings.game_folders.clone(), s.data_dir.clone()))
+        else {
+            return;
+        };
         let mut games = Vec::new();
         let mut warnings = Vec::new();
         match steam::scan(online) {
@@ -138,6 +147,13 @@ fn scan_library(app: AppHandle) {
             Ok(g) => games.extend(g),
             Err(e) => warnings.push(e),
         }
+        // Jocurile adăugate manual au prioritate față de cele găsite în același folder.
+        let manual: Vec<Game> = store::load(&data_dir, "manual.json");
+        let manual: Vec<Game> = manual.into_iter().filter(|g| Path::new(&g.launch_uri).is_file()).collect();
+        let taken: Vec<String> = manual.iter().map(|g| util::norm_path(&g.install_dir)).collect();
+        games.extend(local::scan(&folders).into_iter().filter(|g| !taken.contains(&util::norm_path(&g.install_dir))));
+        games.extend(manual);
+        art::decorate(&mut games, &data_dir, online);
         games.sort_by_key(|g| g.name.to_lowercase());
         if let Ok(mut s) = state.inner.lock() {
             s.games = games.clone();
@@ -185,6 +201,76 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
     Ok(settings)
 }
 
+/// Alege un folder cu jocuri (fereastra de sistem) și îl adaugă în setări.
+/// Întoarce `None` dacă utilizatorul a renunțat.
+#[tauri::command(async)]
+fn add_game_folder(app: AppHandle) -> Result<Option<Settings>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_title("Alege folderul cu jocuri");
+    if let Some(w) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_folder() else { return Ok(None) };
+    let path = picked.into_path().map_err(|e| e.to_string())?.to_string_lossy().into_owned();
+    let state = app.state::<AppState>();
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    let key = util::norm_path(&path);
+    if !s.settings.game_folders.iter().any(|f| util::norm_path(f) == key) {
+        s.settings.game_folders.push(path);
+        store::save(&s.data_dir, "settings.json", &s.settings);
+    }
+    let mut settings = s.settings.clone();
+    settings.autostart = platform::autostart_enabled();
+    Ok(Some(settings))
+}
+
+/// Alege un executabil și îl adaugă în bibliotecă. Întoarce numele jocului,
+/// sau `None` dacă utilizatorul a renunțat; biblioteca se reîmprospătează separat.
+#[tauri::command(async)]
+fn add_game(app: AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    let mut dialog = app.dialog().file().set_title("Alege executabilul jocului").add_filter("Jocuri", &["exe"]);
+    if let Some(w) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&w);
+    }
+    let Some(picked) = dialog.blocking_pick_file() else { return Ok(None) };
+    let exe = picked.into_path().map_err(|e| e.to_string())?;
+    let game = local::manual_game(&exe)?;
+    let name = game.name.clone();
+    let state = app.state::<AppState>();
+    let s = state.inner.lock().map_err(lock_err)?;
+    let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
+    if manual.iter().any(|g| g.id == game.id) {
+        return Err(format!("{name} e deja în bibliotecă."));
+    }
+    manual.push(game);
+    store::save(&s.data_dir, "manual.json", &manual);
+    Ok(Some(name))
+}
+
+/// Scoate din bibliotecă un joc adăugat manual.
+#[tauri::command]
+fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    if !local::is_manual(&id) {
+        return Err("Doar jocurile adăugate manual pot fi eliminate.".into());
+    }
+    let s = state.inner.lock().map_err(lock_err)?;
+    let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
+    manual.retain(|g| g.id != id);
+    store::save(&s.data_dir, "manual.json", &manual);
+    Ok(())
+}
+
+#[tauri::command]
+fn remove_game_folder(state: State<'_, AppState>, path: String) -> Result<Settings, String> {
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    s.settings.game_folders.retain(|f| f != &path);
+    store::save(&s.data_dir, "settings.json", &s.settings);
+    let mut settings = s.settings.clone();
+    settings.autostart = platform::autostart_enabled();
+    Ok(settings)
+}
+
 /// Deschide un folder în Explorer (locația unui joc sau folderul temei).
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
@@ -209,6 +295,17 @@ fn theme_file(state: State<'_, AppState>, name: String) -> Result<tauri::ipc::Re
 }
 
 #[tauri::command]
+fn battery() -> Option<platform::Battery> {
+    platform::battery()
+}
+
+/// Citirea HID poate dura câteva sute de ms, deci rulează în afara firului principal.
+#[tauri::command(async)]
+fn pad_batteries() -> Vec<pads::PadBattery> {
+    pads::batteries()
+}
+
+#[tauri::command]
 fn power(action: String) {
     thread::spawn(move || {
         let _ = platform::power(&action);
@@ -222,6 +319,7 @@ fn exit_app(app: AppHandle) {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             fs::create_dir_all(&data_dir)?;
@@ -249,8 +347,14 @@ fn main() {
             cancel_launch,
             close_game,
             set_setting,
+            add_game_folder,
+            remove_game_folder,
+            add_game,
+            remove_game,
             open_path,
             theme_file,
+            battery,
+            pad_batteries,
             power,
             exit_app
         ])
