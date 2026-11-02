@@ -9,7 +9,7 @@ The interface itself is in Romanian; menu labels below are quoted as they appear
 ## Features
 
 - **Home screen**: your 12 most recently played games in a horizontal row. The selected cover grows and the background fades smoothly to the game's artwork.
-- **Library**: every game in a grid, with filters for Steam, Xbox and local games.
+- **Library**: every game in a grid, with filters for Steam, Xbox and local games. Any game can be removed from the game options; Steam, Xbox and folder games stay installed and can be brought back from **Setări → Jocuri ascunse** (Settings → Hidden games).
 - **Games outside Steam and Xbox**: in **Setări → Foldere cu jocuri** (Settings → Game folders) you add a folder (e.g. `D:\Games`) and every subfolder becomes a game. The main executable is picked automatically; League of Legends and VALORANT launch through Riot Client. You can also add a single game from **Setări → Adaugă un joc** (Settings → Add a game) by picking its executable. Local games get the executable's icon and, when the game is also on Steam, its official cover art.
 - **Launch and return**: games start through Steam, the Xbox app or their own executable. Lumen watches the processes in the game's folder, minimizes while you play and comes back to the foreground when you quit. Playtime is saved automatically.
 - **Battery**: the header shows the PC battery (on laptops and handhelds) and the battery of connected controllers (DualSense / DualShock 4 over HID, Xbox controllers via XInput).

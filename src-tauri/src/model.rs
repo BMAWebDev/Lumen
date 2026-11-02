@@ -40,6 +40,14 @@ pub struct Stat {
     pub launches: u32,
 }
 
+/// Un joc eliminat din bibliotecă. Rămâne instalat, dar scanarea îl sare.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HiddenGame {
+    pub id: String,
+    pub name: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {

@@ -102,13 +102,15 @@ DATA.forEach(([, , , , , ago, play], i) => {
 });
 const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
 let running = null;
+let hidden = [];
+const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
 export async function invoke(cmd, args) {
   switch (cmd) {
     case 'get_state':
-      return { games, stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\tu\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
+      return { games: visible(), stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\tu\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
     case 'scan_library':
-      setTimeout(() => emit('library', { games, warnings: [] }), 700);
+      setTimeout(() => emit('library', { games: visible(), warnings: [] }), 700);
       return;
     case 'launch_game':
       running = { id: args.id, started: false };
@@ -142,9 +144,16 @@ export async function invoke(cmd, args) {
     }
     case 'remove_game': {
       const i = games.findIndex((g) => g.id === args.id);
-      if (i >= 0) games.splice(i, 1);
+      if (i < 0) return;
+      if (args.id.startsWith('manual:')) games.splice(i, 1);
+      else hidden.push({ id: args.id, name: games[i].name });
       return;
     }
+    case 'hidden_games':
+      return [...hidden];
+    case 'restore_game':
+      hidden = hidden.filter((h) => h.id !== args.id);
+      return;
     case 'theme_file':
       throw new Error('fără temă');
     case 'battery':

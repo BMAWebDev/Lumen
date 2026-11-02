@@ -22,7 +22,7 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use model::{AppState, Game, Inner, Running, Settings, Stat};
+use model::{AppState, Game, HiddenGame, Inner, Running, Settings, Stat};
 
 const THEME_README: &str = "Pune aici fișiere cu aceste nume ca să personalizezi Lumen:\r\n\
 \r\n\
@@ -153,6 +153,8 @@ fn scan_library(app: AppHandle) {
         let taken: Vec<String> = manual.iter().map(|g| util::norm_path(&g.install_dir)).collect();
         games.extend(local::scan(&folders).into_iter().filter(|g| !taken.contains(&util::norm_path(&g.install_dir))));
         games.extend(manual);
+        let hidden: Vec<HiddenGame> = store::load(&data_dir, "hidden.json");
+        games.retain(|g| !hidden.iter().any(|h| h.id == g.id));
         art::decorate(&mut games, &data_dir, online);
         games.sort_by_key(|g| g.name.to_lowercase());
         if let Ok(mut s) = state.inner.lock() {
@@ -251,13 +253,41 @@ fn add_game(app: AppHandle) -> Result<Option<String>, String> {
 /// Scoate din bibliotecă un joc adăugat manual.
 #[tauri::command]
 fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    if !local::is_manual(&id) {
-        return Err("Doar jocurile adăugate manual pot fi eliminate.".into());
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    if s.running.as_ref().is_some_and(|r| r.id == id) {
+        return Err("Închide jocul înainte să-l elimini.".into());
     }
+    let name = s.games.iter().find(|g| g.id == id).map(|g| g.name.clone()).ok_or("Jocul nu mai există în bibliotecă.")?;
+    if local::is_manual(&id) {
+        // Jocurile adăugate manual dispar de tot; restul doar se ascund, ca scanarea să nu le readucă.
+        let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
+        manual.retain(|g| g.id != id);
+        store::save(&s.data_dir, "manual.json", &manual);
+    } else {
+        let mut hidden: Vec<HiddenGame> = store::load(&s.data_dir, "hidden.json");
+        if !hidden.iter().any(|h| h.id == id) {
+            hidden.push(HiddenGame { id: id.clone(), name });
+            store::save(&s.data_dir, "hidden.json", &hidden);
+        }
+    }
+    s.games.retain(|g| g.id != id);
+    store::save(&s.data_dir, "games.json", &s.games);
+    Ok(())
+}
+
+#[tauri::command]
+fn hidden_games(state: State<'_, AppState>) -> Result<Vec<HiddenGame>, String> {
     let s = state.inner.lock().map_err(lock_err)?;
-    let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
-    manual.retain(|g| g.id != id);
-    store::save(&s.data_dir, "manual.json", &manual);
+    Ok(store::load(&s.data_dir, "hidden.json"))
+}
+
+/// Readuce în bibliotecă un joc ascuns; apare la următoarea scanare.
+#[tauri::command]
+fn restore_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let s = state.inner.lock().map_err(lock_err)?;
+    let mut hidden: Vec<HiddenGame> = store::load(&s.data_dir, "hidden.json");
+    hidden.retain(|h| h.id != id);
+    store::save(&s.data_dir, "hidden.json", &hidden);
     Ok(())
 }
 
@@ -351,6 +381,8 @@ fn main() {
             remove_game_folder,
             add_game,
             remove_game,
+            hidden_games,
+            restore_game,
             open_path,
             theme_file,
             battery,
