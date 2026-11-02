@@ -1,106 +1,114 @@
 # Lumen
 
-Un lansator de jocuri pentru Windows 11, în stil consolă: pornește direct în ecran complet, se controlează din gamepad și te aduce înapoi singur când închizi jocul. Importă automat jocurile instalate prin **Steam** și prin **aplicația Xbox / PC Game Pass**.
+A console-style game launcher for Windows 11: it boots straight into full screen, is driven by a gamepad, and brings you back on its own when you quit a game. It automatically imports games installed through **Steam** and the **Xbox app / PC Game Pass**, plus games you keep elsewhere.
 
-Construit cu [Tauri 2](https://tauri.app): backend în Rust, interfață în HTML/CSS/JS fără framework, randată de WebView2 (inclus în Windows 11). Executabilul are câțiva MB, iar interfața animă doar `transform` și `opacity`, deci rulează pe GPU și rămâne fluidă și la 120 Hz.
+Built with [Tauri 2](https://tauri.app): a Rust backend and a framework-free HTML/CSS/JS interface rendered by WebView2 (included in Windows 11). The executable is a few MB, and the interface only animates `transform` and `opacity`, so it runs on the GPU and stays smooth even at 120 Hz.
 
-## Ce face
+The interface itself is in Romanian; menu labels below are quoted as they appear in the app.
 
-- **Ecranul principal**: ultimele 12 jocuri jucate, într-un rând orizontal. Coperta selectată se mărește, iar fundalul trece lin la arta jocului.
-- **Biblioteca**: toate jocurile într-o grilă, cu filtre pentru Steam, Xbox și jocurile locale.
-- **Jocuri din afara Steam și Xbox**: în **Setări → Foldere cu jocuri** adaugi un folder (de ex. `D:\Jocuri`), iar fiecare subfolder devine un joc. Executabilul principal se alege automat; League of Legends și VALORANT pornesc prin Riot Client. Poți adăuga și un singur joc, din **Setări → Adaugă un joc**, alegând executabilul. Jocurile locale primesc iconița executabilului și, dacă există și pe Steam, coperta oficială.
-- **Lansare și revenire**: jocul pornește prin Steam sau prin aplicația Xbox. Lumen urmărește procesele din folderul jocului, se minimizează cât joci și revine în prim-plan după ce ieși. Timpul de joc se salvează automat.
-- **Butonul Guide** (logo-ul Xbox de pe controller) deschide meniul rapid de oriunde, chiar și din joc.
-- **Meniul rapid**: Acasă, Bibliotecă, Închide jocul, Reîmprospătează, Setări, Alimentare (repaus, repornire, oprire).
-- **Pornire odată cu Windows**, pentru o experiență de consolă de la boot.
-- **Teme**: sunete, muzică, font și fundal personalizate, fără să modifici codul.
+## Features
 
-## Controale
+- **Home screen**: your 12 most recently played games in a horizontal row. The selected cover grows and the background fades smoothly to the game's artwork.
+- **Library**: every game in a grid, with filters for Steam, Xbox and local games.
+- **Games outside Steam and Xbox**: in **Setări → Foldere cu jocuri** (Settings → Game folders) you add a folder (e.g. `D:\Games`) and every subfolder becomes a game. The main executable is picked automatically; League of Legends and VALORANT launch through Riot Client. You can also add a single game from **Setări → Adaugă un joc** (Settings → Add a game) by picking its executable. Local games get the executable's icon and, when the game is also on Steam, its official cover art.
+- **Launch and return**: games start through Steam, the Xbox app or their own executable. Lumen watches the processes in the game's folder, minimizes while you play and comes back to the foreground when you quit. Playtime is saved automatically.
+- **Battery**: the header shows the PC battery (on laptops and handhelds) and the battery of connected controllers (DualSense / DualShock 4 over HID, Xbox controllers via XInput).
+- **PlayStation controllers**: DualSense and DualShock 4 are detected, and button hints switch to ✕ ○ △.
+- **Guide button** (the Xbox logo on the controller) opens the quick menu from anywhere, even in game.
+- **Quick menu**: Home, Library, Close game, Refresh, Settings, Power (sleep, restart, shut down).
+- **Start with Windows**, for a console-like experience from boot.
+- **Themes**: custom sounds, music, font and wallpaper without touching the code.
 
-| Acțiune | Gamepad | Tastatură |
+## Controls
+
+| Action | Gamepad | Keyboard |
 |---|---|---|
-| Navigare | D-pad / stick stânga | Săgeți |
-| Joacă / Selectează | A (✕ pe DualSense) | Enter |
-| Înapoi | B (○) | Esc |
-| Opțiuni joc | Menu (☰) / Y (Options / △ pe DualSense) | O |
-| Meniu rapid | View / Guide (Create / PS pe DualSense) | Tab |
-| Comută Jocuri ↔ Bibliotecă | LB / RB | Q / E |
-| Primul / ultimul joc | LT / RT (L2 / R2) | Home / End |
+| Navigate | D-pad / left stick | Arrow keys |
+| Play / Select | A (✕ on DualSense) | Enter |
+| Back | B (○) | Esc |
+| Game options | Menu (☰) / Y (Options / △ on DualSense) | O |
+| Quick menu | View / Guide (Create / PS on DualSense) | Tab |
+| Switch Games ↔ Library | LB / RB | Q / E |
+| First / last game | LT / RT (L2 / R2) | Home / End |
 
-Merge și cu mouse-ul: un clic selectează, al doilea lansează.
+The mouse works too: one click selects, a second click launches.
 
-## Compilare
+## Building
 
-### Varianta simplă: GitHub Actions
+### The easy way: GitHub Actions
 
-Urcă proiectul pe GitHub. Workflow-ul din `.github/workflows/build.yml` compilează pe Windows la fiecare push și pune la dispoziție, în tab-ul **Actions → Artifacts**, atât `lumen.exe` (portabil) cât și installer-ul `Lumen_x.y.z_x64-setup.exe`.
+Push the project to GitHub. The workflow in `.github/workflows/build.yml` builds on Windows on every push and publishes both `lumen.exe` (portable) and the `Lumen_x.y.z_x64-setup.exe` installer under **Actions → Artifacts**.
 
-Dacă publici un tag (`git tag v0.1.0 && git push --tags`), installer-ul apare automat ca **Release**.
+If you push a tag (`git tag v0.1.0 && git push --tags`), the installer is published automatically as a **Release**.
 
-### Local, pe Windows
+### Locally, on Windows
 
-1. Instalează [Rust](https://rustup.rs) (toolchain-ul implicit, `stable-x86_64-pc-windows-msvc`).
-2. Instalează [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) cu sarcina **Desktop development with C++**.
-3. Instalează CLI-ul Tauri (o singură dată):
+1. Install [Rust](https://rustup.rs) (the default toolchain, `stable-x86_64-pc-windows-msvc`).
+2. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) with the **Desktop development with C++** workload.
+3. Install the Tauri CLI (once):
    ```powershell
    cargo install tauri-cli --version "^2" --locked
    ```
-4. Din folderul proiectului:
+4. From the project folder:
    ```powershell
-   cargo tauri dev     # rulează în modul dezvoltare (F12 = DevTools)
-   cargo tauri build   # creează installer-ul în src-tauri\target\release\bundle\nsis\
+   cargo tauri dev     # run in development mode (F12 = DevTools)
+   cargo tauri build   # build the installer into src-tauri\target\release\bundle\nsis\
    ```
 
-Nu e nevoie de Node.js sau npm.
+Node.js and npm are not needed.
 
-### Doar interfața, în browser
+### Just the interface, in a browser
 
-Interfața funcționează și fără backend, cu jocuri simulate, ceea ce e util când lucrezi la design:
+The interface also works without the backend, using mock games, which is handy for design work:
 
 ```powershell
 cd ui
 python -m http.server 8765
 ```
 
-Apoi deschide `http://localhost:8765`. În consola browserului, `lumenGuide()` simulează butonul Guide.
+Then open `http://localhost:8765`. In the browser console, `lumenGuide()` simulates the Guide button.
 
-## Personalizare
+## Customization
 
-Lumen creează folderul temei la prima pornire, în `%APPDATA%\dev.lumen.launcher\theme`. Îl deschizi și din **Setări → Deschide folderul temei**. Pune acolo fișiere cu aceste nume:
+Lumen creates its theme folder on first launch, at `%APPDATA%\dev.lumen.launcher\theme`. You can also open it from **Setări → Deschide folderul temei** (Settings → Open theme folder). Put files with these names there:
 
-| Fișier | Rol |
+| File | Purpose |
 |---|---|
-| `move.wav`, `confirm.wav`, `back.wav`, `open.wav`, `launch.wav` | sunetele interfeței (acceptă și ogg, mp3) |
-| `music.mp3` | muzică de fundal în buclă (acceptă și ogg, wav, m4a) |
-| `font.ttf` | fontul interfeței (acceptă și otf, woff, woff2) |
-| `wallpaper.jpg` | fundalul implicit (acceptă și png, webp) |
+| `move.wav`, `confirm.wav`, `back.wav`, `open.wav`, `launch.wav` | interface sounds (ogg and mp3 also work) |
+| `music.mp3` | looping background music (ogg, wav and m4a also work) |
+| `font.ttf` | interface font (otf, woff and woff2 also work) |
+| `wallpaper.jpg` | default background (png and webp also work) |
 
-Repornește Lumen după modificări. Fișierele de temă rămân pe calculatorul tău și nu fac parte din repository.
+Restart Lumen after making changes. Theme files stay on your computer and are not part of the repository.
 
-**Imaginile Steam** se iau, în ordine, din: imaginile personalizate din Steam (`userdata\…\config\grid`), cache-ul local al bibliotecii Steam, apoi CDN-ul Steam (poți dezactiva descărcarea din Setări).
+**Steam artwork** is taken, in order, from: your custom Steam artwork (`userdata\…\config\grid`), the local Steam library cache, then the Steam CDN (downloading can be turned off in Settings).
 
-## Cum funcționează
+## How it works
 
-| Fișier | Rol |
+| File | Purpose |
 |---|---|
-| `src-tauri/src/steam.rs` | citește `libraryfolders.vdf` și `appmanifest_*.acf` din fiecare bibliotecă Steam |
-| `src-tauri/src/xbox.rs` | găsește jocurile GDK (cele cu `MicrosoftGame.config`) prin `Get-AppxPackage` |
-| `src-tauri/src/launcher.rs` | lansează prin `steam://rungameid/…` sau `shell:AppsFolder\…`, apoi urmărește procesele din folderul jocului |
-| `src-tauri/src/guide.rs` | citește butonul Guide prin `XInputGetStateEx` |
-| `src-tauri/src/platform.rs` | apeluri Windows: procese, prim-plan, registry, alimentare |
-| `ui/js/app.js` | interfața: rândul, biblioteca, meniurile, navigarea |
-| `ui/js/input.js` | tastatură, gamepad, rotița mouse-ului |
-| `ui/js/sound.js` | sunete sintetizate cu Web Audio sau încărcate din temă |
+| `src-tauri/src/steam.rs` | reads `libraryfolders.vdf` and `appmanifest_*.acf` from every Steam library |
+| `src-tauri/src/xbox.rs` | finds GDK games (those with `MicrosoftGame.config`) via `Get-AppxPackage` |
+| `src-tauri/src/local.rs` | scans game folders and builds manually added games |
+| `src-tauri/src/art.rs` | extracts executable icons and looks local games up on Steam for cover art |
+| `src-tauri/src/launcher.rs` | launches via `steam://rungameid/…`, `shell:AppsFolder\…` or the game's executable, then watches the processes in the game's folder |
+| `src-tauri/src/guide.rs` | reads the Guide button via `XInputGetStateEx` |
+| `src-tauri/src/pads.rs` | reads controller battery (HID for Sony, XInput for Xbox) |
+| `src-tauri/src/platform.rs` | Windows calls: processes, foreground, registry, power, PC battery |
+| `ui/js/app.js` | the interface: row, library, menus, navigation |
+| `ui/js/input.js` | keyboard, gamepad, mouse wheel |
+| `ui/js/sound.js` | sounds synthesized with Web Audio or loaded from the theme |
 
-Datele (biblioteca scanată, timpul de joc, setările) se salvează ca JSON în `%APPDATA%\dev.lumen.launcher\`.
+Data (the scanned library, playtime, settings, manually added games and cached artwork) is saved as JSON in `%APPDATA%\dev.lumen.launcher\`.
 
-## Limitări cunoscute
+## Known limitations
 
-- **Jocurile Xbox mai vechi (UWP)**, fără `MicrosoftGame.config`, nu sunt detectate. Majoritatea titlurilor Game Pass actuale sunt GDK și apar.
-- **DualSense**: navigarea în interfață funcționează nativ, dar butonul PS deschide meniul rapid doar dacă controllerul e mapat ca XInput (Steam Input sau DS4Windows).
-- **Meniul rapid peste joc** apare peste jocurile în fereastră fără margini (borderless). Jocurile în exclusive fullscreen se minimizează când Lumen trece în prim-plan.
-- Un joc Steam care pornește la rândul lui alt launcher (EA, Ubisoft) poate rula din alt folder. Atunci timpul de joc nu se înregistrează corect.
+- **Older Xbox (UWP) games** without `MicrosoftGame.config` are not detected. Most current Game Pass titles are GDK and do show up.
+- **DualSense**: navigating the interface works natively, but the PS button opens the quick menu only if the controller is mapped as XInput (Steam Input or DS4Windows).
+- **The quick menu over a game** appears on top of games running in borderless windowed mode. Games in exclusive fullscreen are minimized when Lumen comes to the foreground.
+- A Steam game that starts another launcher of its own (EA, Ubisoft) may run from a different folder; its playtime is then not recorded correctly.
+- **Local games**: the main executable is picked heuristically. If the wrong one is chosen, add the game manually with the right executable; it replaces the automatic entry.
 
-## Licență
+## License
 
 MIT
