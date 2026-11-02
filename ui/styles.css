@@ -315,7 +315,13 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .panel header { padding: 9rem 5rem 2.8rem; }
 .panel h2 { margin: 0; font-size: 3.4rem; font-weight: 300; }
 .panel header p { margin: 1rem 0 0; color: var(--dim); font-size: 1.8rem; }
-.panel ul { list-style: none; margin: 0; padding: 0 2rem 4rem; overflow: hidden; flex: 1; }
+/* Lista se derulează; ultimele opțiuni se opresc deasupra indiciilor de butoane. */
+.panel ul {
+  list-style: none; margin: 0; padding: 0 2rem 11rem; flex: 1; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+  scroll-padding-bottom: 11rem;
+}
+.panel ul::-webkit-scrollbar { display: none; }
 .item {
   display: flex; align-items: center; justify-content: space-between; gap: 2.4rem;
   min-height: 7.6rem; padding: 1.4rem 3rem; border-radius: 1.4rem;
@@ -400,8 +406,16 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 /* Indicii de butoane */
 .hints {
   position: fixed; right: var(--pad); bottom: 3.6rem; z-index: 12;
-  display: flex; gap: 3.2rem; font-size: 1.6rem; color: var(--mist);
+  display: flex; justify-content: flex-end; gap: 3.2rem; font-size: 1.6rem; color: var(--mist);
 }
+/* Cu un panou lateral deschis, indiciile devin bara lui de jos, pe lățimea panoului. */
+body.panel-open .hints {
+  right: 0; bottom: 0; width: 58rem;
+  padding: 2rem 5rem;
+  background: var(--panel);
+  border-top: 0.1rem solid rgba(255, 255, 255, 0.08);
+}
+.hints:empty { display: none; }
 .hint { display: flex; align-items: center; gap: 1rem; }
 .glyph {
   min-width: 2.8rem; height: 2.8rem; padding: 0 0.7rem; border-radius: 1.4rem;

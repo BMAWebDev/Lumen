@@ -642,6 +642,7 @@ scrim.addEventListener('click', () => { const t = stack[stack.length - 1]; if (t
 
 function syncScrim() {
   scrim.classList.toggle('show', stack.some((o) => o.type !== 'launch'));
+  document.body.classList.toggle('panel-open', stack[stack.length - 1]?.type === 'panel');
   updateHints();
 }
 
@@ -860,7 +861,6 @@ function openGameOptions(g) {
       ? { label: 'Închide jocul', danger: true, action: () => { closeTop(true); askCloseGame(); } }
       : { label: 'Joacă', action: () => { closeTop(true); launch(g); } },
     { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
-    { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
   ];
   if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
   // Jocul pornit se poate închide din opțiunile oricărui joc din bibliotecă.
