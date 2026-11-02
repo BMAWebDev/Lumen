@@ -107,6 +107,16 @@ body[data-view="library"] #bg::after { opacity: 0.72; }
   background: linear-gradient(140deg, #4d7dff, #8c4dff);
   font-weight: 600; font-size: 1.9rem;
 }
+.battery { display: flex; align-items: center; gap: 0.8rem; font-size: 1.9rem; color: var(--mist); font-variant-numeric: tabular-nums; }
+.battery[hidden] { display: none; }
+.batt-icon { display: flex; }
+.batt-icon svg { width: 3.4rem; height: 1.8rem; }
+.battery.low { color: #f87171; }
+.battery.charging .batt-icon { color: #4ade80; }
+.pad-batteries { display: flex; align-items: center; gap: 2.4rem; }
+.pad-batteries:empty { display: none; }
+.pad-icon { display: flex; color: var(--mist); }
+.pad-icon svg { width: 2.6rem; height: 2.6rem; }
 #clock { font-size: 2.2rem; font-variant-numeric: tabular-nums; color: var(--ink); min-width: 6rem; text-align: right; }
 .running-pill {
   display: flex; align-items: center; gap: 1rem;
@@ -161,6 +171,12 @@ main { position: fixed; inset: 0; z-index: 2; }
   position: absolute; inset: 0; display: flex; align-items: flex-end; padding: 1.6rem;
   font-size: 2.2rem; font-weight: 700; line-height: 1.1;
   background: linear-gradient(150deg, hsl(var(--h) 55% 36%), hsl(calc(var(--h) + 40) 60% 14%));
+}
+.ph-icon {
+  position: absolute; left: 50%; top: 40%; width: 50%; aspect-ratio: 1;
+  transform: translate(-50%, -50%);
+  background: center / contain no-repeat;
+  filter: drop-shadow(0 0.8rem 1.6rem rgba(0, 0, 0, 0.45));
 }
 .tile::after, .gtile .art::after {
   content: ""; position: absolute; inset: -0.7rem; border-radius: 1.9rem;
@@ -229,6 +245,7 @@ body[data-zone="actions"] .btn.focused::after { opacity: 1; }
 .platform::before { content: ""; width: 0.9rem; height: 0.9rem; border-radius: 50%; background: var(--c); }
 .platform.steam { --c: #66c0f4; }
 .platform.xbox { --c: #5dc35d; }
+.platform.local { --c: #f5b84a; }
 
 /* ---------------------------------------------------------- Biblioteca */
 .lib-head {
@@ -392,3 +409,4 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
   border: 0.15rem solid rgba(198, 208, 226, 0.7);
   font-size: 1.3rem; font-weight: 700; color: var(--ink);
 }
+.glyph svg { width: 1.5rem; height: 1.5rem; }

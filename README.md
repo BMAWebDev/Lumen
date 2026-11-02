@@ -7,7 +7,8 @@ Construit cu [Tauri 2](https://tauri.app): backend în Rust, interfață în HTM
 ## Ce face
 
 - **Ecranul principal**: ultimele 12 jocuri jucate, într-un rând orizontal. Coperta selectată se mărește, iar fundalul trece lin la arta jocului.
-- **Biblioteca**: toate jocurile într-o grilă, cu filtre pentru Steam și Xbox.
+- **Biblioteca**: toate jocurile într-o grilă, cu filtre pentru Steam, Xbox și jocurile locale.
+- **Jocuri din afara Steam și Xbox**: în **Setări → Foldere cu jocuri** adaugi un folder (de ex. `D:\Jocuri`), iar fiecare subfolder devine un joc. Executabilul principal se alege automat; League of Legends și VALORANT pornesc prin Riot Client. Poți adăuga și un singur joc, din **Setări → Adaugă un joc**, alegând executabilul. Jocurile locale primesc iconița executabilului și, dacă există și pe Steam, coperta oficială.
 - **Lansare și revenire**: jocul pornește prin Steam sau prin aplicația Xbox. Lumen urmărește procesele din folderul jocului, se minimizează cât joci și revine în prim-plan după ce ieși. Timpul de joc se salvează automat.
 - **Butonul Guide** (logo-ul Xbox de pe controller) deschide meniul rapid de oriunde, chiar și din joc.
 - **Meniul rapid**: Acasă, Bibliotecă, Închide jocul, Reîmprospătează, Setări, Alimentare (repaus, repornire, oprire).
@@ -21,9 +22,10 @@ Construit cu [Tauri 2](https://tauri.app): backend în Rust, interfață în HTM
 | Navigare | D-pad / stick stânga | Săgeți |
 | Joacă / Selectează | A (✕ pe DualSense) | Enter |
 | Înapoi | B (○) | Esc |
-| Opțiuni joc | Y / View | O |
-| Meniu rapid | Menu / Guide | Tab |
+| Opțiuni joc | Menu (☰) / Y (Options / △ pe DualSense) | O |
+| Meniu rapid | View / Guide (Create / PS pe DualSense) | Tab |
 | Comută Jocuri ↔ Bibliotecă | LB / RB | Q / E |
+| Primul / ultimul joc | LT / RT (L2 / R2) | Home / End |
 
 Merge și cu mouse-ul: un clic selectează, al doilea lansează.
 

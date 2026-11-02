@@ -79,6 +79,8 @@ pub fn scan(online_art: bool) -> Result<Vec<Game>, String> {
                 name: name.to_string(),
                 install_dir: install.to_string_lossy().into_owned(),
                 launch_uri: format!("steam://rungameid/{id}"),
+                launch_args: Vec::new(),
+                icon: None,
                 cover: art(id, &grids, &cache, Art::Cover, online_art),
                 hero: art(id, &grids, &cache, Art::Hero, online_art),
                 logo: art(id, &grids, &cache, Art::Logo, online_art),
@@ -105,6 +107,17 @@ fn grid_dirs(root: &Path) -> Vec<PathBuf> {
 
 fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
+}
+
+/// Coperta, fundalul și logo-ul de pe CDN-ul Steam, pentru un joc din afara Steam
+/// care are totuși o pagină în magazin.
+pub fn cdn_art(id: u32) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let url = |f: &str| format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{id}/{f}");
+    (
+        vec![url("library_600x900.jpg"), url("header.jpg")],
+        vec![url("library_hero.jpg")],
+        vec![url("logo.png")],
+    )
 }
 
 /// Candidații pentru o imagine: întâi cele personalizate de utilizator, apoi

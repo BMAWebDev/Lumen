@@ -1,6 +1,6 @@
 // Intrare unificată: tastatură, gamepad (Gamepad API), rotița mouse-ului.
 // Emite acțiuni abstracte: up, down, left, right, confirm, back, menu, options,
-// prevTab, nextTab. Direcțiile se repetă când sunt ținute apăsate.
+// prevTab, nextTab, first, last. Direcțiile se repetă când sunt ținute apăsate.
 
 const KEYS = {
   ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right',
@@ -9,22 +9,33 @@ const KEYS = {
   Tab: 'menu', F1: 'menu',
   o: 'options', O: 'options',
   q: 'prevTab', Q: 'prevTab', e: 'nextTab', E: 'nextTab',
+  Home: 'first', End: 'last',
 };
 
 // Maparea „standard” din Gamepad API (Xbox / DualSense în Chromium).
 const BUTTONS = {
-  0: 'confirm', 1: 'back', 3: 'options', 8: 'options', 9: 'menu', 16: 'menu',
-  4: 'prevTab', 5: 'nextTab',
+  // 8 = View / Share (stânga), 9 = Menu / Options (dreapta), 16 = Guide / PS.
+  0: 'confirm', 1: 'back', 3: 'options', 8: 'menu', 9: 'options', 16: 'menu',
+  4: 'prevTab', 5: 'nextTab', 6: 'first', 7: 'last', // LB / RB, LT / RT (L1 / R1, L2 / R2)
   12: 'up', 13: 'down', 14: 'left', 15: 'right',
 };
 const DIRS = new Set(['up', 'down', 'left', 'right']);
+// Controlerele Sony (DualShock 4, DualSense) au vendor ID 054c; WebView2 îl pune în `id`.
+const SONY = /054c|dualsense|dualshock|playstation|wireless controller/i;
+const padKind = (p) => (SONY.test(p?.id || '') ? 'playstation' : 'xbox');
 const REPEAT_DELAY = 360;
 const REPEAT_RATE = 95;
 const STICK = 0.55;
 
 export function createInput({ onAction, onDevice }) {
   let device = 'keyboard';
-  const setDevice = (d) => { if (d !== device) { device = d; onDevice?.(d); } };
+  let pad = 'xbox'; // tipul ultimului gamepad folosit: 'xbox' sau 'playstation'
+  const setDevice = (d, kind = pad) => {
+    if (d === device && kind === pad) return;
+    device = d;
+    pad = kind;
+    onDevice?.(d, pad);
+  };
 
   // --- Tastatură
   window.addEventListener('keydown', (ev) => {
@@ -57,18 +68,18 @@ export function createInput({ onAction, onDevice }) {
   function frame(now) {
     const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
     if (!pads.length) { polling = false; held.clear(); return; }
-    const active = new Set();
+    const active = new Map(); // acțiune -> gamepad-ul care a declanșat-o
     for (const p of pads) {
-      p.buttons.forEach((b, i) => { if (b.pressed && BUTTONS[i]) active.add(BUTTONS[i]); });
+      p.buttons.forEach((b, i) => { if (b.pressed && BUTTONS[i]) active.set(BUTTONS[i], p); });
       const [x = 0, y = 0] = p.axes;
-      if (x < -STICK) active.add('left'); else if (x > STICK) active.add('right');
-      if (y < -STICK) active.add('up'); else if (y > STICK) active.add('down');
+      if (x < -STICK) active.set('left', p); else if (x > STICK) active.set('right', p);
+      if (y < -STICK) active.set('up', p); else if (y > STICK) active.set('down', p);
     }
-    for (const a of active) {
+    for (const [a, p] of active) {
       const h = held.get(a);
       if (!h) {
         held.set(a, { next: now + REPEAT_DELAY });
-        setDevice('gamepad');
+        setDevice('gamepad', padKind(p));
         onAction(a);
       } else if (DIRS.has(a) && now >= h.next) {
         h.next = now + REPEAT_RATE;
@@ -83,9 +94,12 @@ export function createInput({ onAction, onDevice }) {
     polling = true;
     requestAnimationFrame(frame);
   }
-  window.addEventListener('gamepadconnected', () => { setDevice('gamepad'); startPolling(); });
+  window.addEventListener('gamepadconnected', (e) => { setDevice('gamepad', padKind(e.gamepad)); startPolling(); });
   window.addEventListener('focus', startPolling);
+  // Un controler deja conectat la pornire stabilește tipul indiciilor de la început.
+  const first = navigator.getGamepads ? [...navigator.getGamepads()].find(Boolean) : null;
+  if (first) pad = padKind(first);
   startPolling();
 
-  return { get device() { return device; }, setDevice };
+  return { get device() { return device; }, get pad() { return pad; }, setDevice };
 }

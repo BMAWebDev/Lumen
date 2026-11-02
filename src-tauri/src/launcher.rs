@@ -44,7 +44,12 @@ pub fn launch(app: &AppHandle, id: &str) -> Result<(), String> {
         (game, s.settings.minimize_on_launch)
     };
 
-    if let Err(e) = platform::open_uri(&game.launch_uri) {
+    let started = if game.source == "local" {
+        platform::run_exe(&game.launch_uri, &game.launch_args)
+    } else {
+        platform::open_uri(&game.launch_uri)
+    };
+    if let Err(e) = started {
         clear(app, id);
         return Err(format!("Jocul nu a putut fi pornit: {e}"));
     }
