@@ -804,6 +804,27 @@ async function openAudioOutputs() {
   }));
 }
 
+// Steam și jocurile cu dezinstalator își cer confirmarea în propria fereastră; Xbox se dezinstalează direct.
+function uninstallGame(g) {
+  const run = async () => {
+    try {
+      toast(`Se dezinstalează ${g.name}…`);
+      const r = await call('uninstall_game', { id: g.id });
+      closeAll();
+      if (r.done) {
+        S.games = S.games.filter((x) => x.id !== g.id);
+        renderRow();
+        renderLibrary();
+      }
+      toast(r.message);
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  };
+  if (g.source !== 'xbox') { run(); return; }
+  confirmPanel(`Dezinstalezi ${g.name}?`, 'Jocul și fișierele lui sunt șterse de pe disc.', 'Dezinstalează', run);
+}
+
 async function openHiddenGames() {
   let hidden = [];
   try { hidden = (await call('hidden_games')) || []; } catch (e) { toast(String(e), 'error'); return; }
@@ -885,6 +906,7 @@ function openGameOptions(g) {
       : { label: 'Joacă', action: () => { closeTop(true); launch(g); } },
     { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
   ];
+  if (!running) items.push({ label: 'Dezinstalează', danger: true, action: () => uninstallGame(g) });
   if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
   // Jocul pornit se poate închide din opțiunile oricărui joc din bibliotecă.
   const other = !running && gameById(S.running?.id);

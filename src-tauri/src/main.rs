@@ -10,6 +10,7 @@ mod pads;
 mod platform;
 mod steam;
 mod store;
+mod uninstall;
 mod util;
 mod vdf;
 mod xbox;
@@ -281,6 +282,19 @@ fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Dezinstalează un joc. Xbox rulează `Remove-AppxPackage` (câteva secunde), deci în afara firului principal.
+#[tauri::command(async)]
+fn uninstall_game(state: State<'_, AppState>, id: String) -> Result<uninstall::Outcome, String> {
+    let game = {
+        let s = state.inner.lock().map_err(lock_err)?;
+        if s.running.as_ref().is_some_and(|r| r.id == id) {
+            return Err("Închide jocul înainte să-l dezinstalezi.".into());
+        }
+        s.games.iter().find(|g| g.id == id).cloned().ok_or("Jocul nu mai există în bibliotecă.")?
+    };
+    uninstall::run(&game)
+}
+
 #[tauri::command]
 fn hidden_games(state: State<'_, AppState>) -> Result<Vec<HiddenGame>, String> {
     let s = state.inner.lock().map_err(lock_err)?;
@@ -399,6 +413,7 @@ fn main() {
             remove_game_folder,
             add_game,
             remove_game,
+            uninstall_game,
             hidden_games,
             restore_game,
             open_path,

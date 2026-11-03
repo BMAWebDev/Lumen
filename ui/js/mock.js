@@ -157,6 +157,14 @@ export async function invoke(cmd, args) {
       else hidden.push({ id: args.id, name: games[i].name });
       return;
     }
+    case 'uninstall_game': {
+      const g = games.find((x) => x.id === args.id);
+      if (!g) throw new Error('Jocul nu mai există în bibliotecă.');
+      if (g.source === 'local') throw new Error('Jocul nu are dezinstalator. Deschide locația jocului și șterge folderul manual.');
+      if (g.source === 'steam') return { done: false, message: 'Confirmă dezinstalarea în fereastra Steam, apoi reîmprospătează biblioteca.' };
+      games.splice(games.indexOf(g), 1);
+      return { done: true, message: `${g.name} a fost dezinstalat.` };
+    }
     case 'hidden_games':
       return [...hidden];
     case 'restore_game':
