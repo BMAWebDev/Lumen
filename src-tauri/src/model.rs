@@ -60,8 +60,6 @@ pub struct Settings {
     pub reduce_motion: bool,
     /// Foldere ale căror subfoldere sunt jocuri instalate separat.
     pub game_folders: Vec<String>,
-    /// Citit din registry la fiecare cerere, nu salvat în fișier.
-    #[serde(skip_deserializing)]
     pub autostart: bool,
 }
 

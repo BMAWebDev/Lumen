@@ -386,8 +386,14 @@ pub fn open_uri(uri: &str) -> Result<(), String> {
 #[cfg(windows)]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
+/// Windows întârzie cu câteva secunde aplicațiile din cheia `Run`. Un task la logon
+/// pornește imediat, deci autostart-ul folosește Task Scheduler.
 #[cfg(windows)]
-pub fn autostart_enabled() -> bool {
+const TASK_NAME: &str = "Lumen";
+
+/// Autostart-ul vechi, prin registry. Doar pentru migrarea către task.
+#[cfg(windows)]
+pub fn legacy_autostart_enabled() -> bool {
     hidden("reg")
         .args(["query", RUN_KEY, "/v", "Lumen"])
         .output()
@@ -396,18 +402,36 @@ pub fn autostart_enabled() -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn autostart_enabled() -> bool {
+pub fn legacy_autostart_enabled() -> bool {
     false
 }
 
 #[cfg(windows)]
 pub fn set_autostart(on: bool) -> Result<(), String> {
     if on {
+        if cfg!(debug_assertions) {
+            return Err("Pornirea cu Windows se activează doar din versiunea instalată.".into());
+        }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let value = format!("\"{}\"", exe.display());
-        run(hidden("reg").args(["add", RUN_KEY, "/v", "Lumen", "/t", "REG_SZ", "/d", value.as_str(), "/f"]))
+        let q = |s: &str| s.replace('\'', "''");
+        let dir = q(&exe.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        let exe = q(&exe.to_string_lossy());
+        // Prioritatea 4 (normală): implicit un task rulează cu 7, adică mai lent.
+        let script = format!(
+            "$ErrorActionPreference = 'Stop';              $a = New-ScheduledTaskAction -Execute '{exe}' -WorkingDirectory '{dir}';              $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;              $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries                   -ExecutionTimeLimit ([TimeSpan]::Zero) -Priority 4;              $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited;              Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null;              'ok'"
+        );
+        let out = powershell(&script)?;
+        if !out.contains("ok") {
+            return Err("Nu s-a putut crea task-ul de pornire.".into());
+        }
+        let _ = hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]).status();
+        Ok(())
     } else {
-        run(hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]))
+        let _ = powershell(&format!(
+            "Unregister-ScheduledTask -TaskName '{TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue"
+        ));
+        let _ = hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]).status();
+        Ok(())
     }
 }
 
