@@ -1207,6 +1207,8 @@ async function boot() {
     if (top?.type === 'quick') { if (S.running?.started) resumeGame(); else closeTop(); }
     else openQuick();
   });
+  // Dongle-ul DS5 Bridge a cedat controlerul: următoarea apăsare pe PS îl conectează la PC.
+  on('pad-handoff', () => toast('Apasă PS ca să conectezi controlerul la Bluetooth-ul PC-ului.'));
   on('game-started', ({ id }) => {
     S.running = { id, started: true };
     launchOverlay?.box.classList.add('started');
