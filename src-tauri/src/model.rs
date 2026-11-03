@@ -52,6 +52,8 @@ pub struct HiddenGame {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub minimize_on_launch: bool,
+    /// Îngheață jocul cât meniul Lumen e deschis peste el.
+    pub pause_game: bool,
     pub sounds: bool,
     pub music: bool,
     pub online_art: bool,
@@ -67,6 +69,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             minimize_on_launch: true,
+            pause_game: true,
             sounds: true,
             music: true,
             online_art: true,

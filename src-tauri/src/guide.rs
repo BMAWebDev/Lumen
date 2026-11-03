@@ -41,6 +41,7 @@ fn fire(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         crate::platform::bring_to_front(&w);
     }
+    crate::launcher::pause(app);
     let _ = app.emit("guide", ());
 }
 

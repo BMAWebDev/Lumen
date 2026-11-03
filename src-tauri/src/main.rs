@@ -196,6 +196,7 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
         let mut s = state.inner.lock().map_err(lock_err)?;
         match key.as_str() {
             "minimizeOnLaunch" => s.settings.minimize_on_launch = value,
+            "pauseGame" => s.settings.pause_game = value,
             "sounds" => s.settings.sounds = value,
             "music" => s.settings.music = value,
             "onlineArt" => s.settings.online_art = value,
@@ -425,6 +426,17 @@ fn main() {
             power,
             exit_app
         ])
-        .run(tauri::generate_context!())
-        .expect("Lumen nu a putut porni");
+        .on_window_event(|_, event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                launcher::unpause_after_blur();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("Lumen nu a putut porni")
+        .run(|_, event| {
+            // Un joc rămas înghețat după ieșirea din Lumen n-ar mai putea fi reluat.
+            if let tauri::RunEvent::Exit = event {
+                launcher::unpause();
+            }
+        });
 }

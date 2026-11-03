@@ -53,6 +53,7 @@ pub(crate) mod win {
     pub const TH32CS_SNAPPROCESS: u32 = 0x2;
     pub const PROCESS_TERMINATE: u32 = 0x0001;
     pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    pub const PROCESS_SUSPEND_RESUME: u32 = 0x0800;
 
     #[repr(C)]
     pub struct ProcessEntry32W {
@@ -99,6 +100,12 @@ pub(crate) mod win {
         pub fn LoadLibraryW(name: *const u16) -> HANDLE;
         pub fn GetProcAddress(module: HANDLE, name: *const u8) -> *const c_void;
         pub fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        pub fn NtSuspendProcess(h: HANDLE) -> i32;
+        pub fn NtResumeProcess(h: HANDLE) -> i32;
     }
 
     #[link(name = "user32")]
@@ -194,6 +201,27 @@ pub fn kill(pid: u32) {
 
 #[cfg(not(windows))]
 pub fn kill(_pid: u32) {}
+
+/// Pune în pauză (sau reia) toate firele unui proces. Un joc fără focus primește
+/// totuși input de la controler, așa că cât meniul e deschis îl înghețăm.
+#[cfg(windows)]
+pub fn set_suspended(pid: u32, suspend: bool) -> bool {
+    use win::*;
+    unsafe {
+        let h = OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid);
+        if h == 0 {
+            return false;
+        }
+        let status = if suspend { NtSuspendProcess(h) } else { NtResumeProcess(h) };
+        CloseHandle(h);
+        status >= 0
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_suspended(_pid: u32, _suspend: bool) -> bool {
+    false
+}
 
 /// Aduce fereastra lansatorului în prim-plan, chiar dacă un joc are focusul.
 pub fn bring_to_front(w: &tauri::WebviewWindow) {
