@@ -100,7 +100,7 @@ const stats = {};
 DATA.forEach(([, , , , , ago, play], i) => {
   if (ago) stats[games[i].id] = { playtimeSec: play, lastPlayed: now - ago, launches: 3 + i };
 });
-const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
+const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Difuzoare (Realtek Audio)'], ['b', 'Căști (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];

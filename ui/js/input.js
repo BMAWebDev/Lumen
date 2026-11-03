@@ -14,8 +14,10 @@ const KEYS = {
 
 // Maparea „standard” din Gamepad API (Xbox / DualSense în Chromium).
 const BUTTONS = {
-  // 8 = View / Share (stânga), 9 = Menu / Options (dreapta), 16 = Guide / PS.
-  0: 'confirm', 1: 'back', 3: 'options', 8: 'menu', 9: 'options', 16: 'menu',
+  // 8 = View / Share (stânga), 9 = Menu / Options (dreapta). Butonul 16 (Guide / PS) lipsește
+  // intenționat: îl citește nativ `guide.rs` și emite evenimentul „guide”; mapat și aici,
+  // o apăsare ar deschide meniul rapid și l-ar închide imediat.
+  0: 'confirm', 1: 'back', 3: 'options', 8: 'menu', 9: 'options',
   4: 'prevTab', 5: 'nextTab', 6: 'first', 7: 'last', // LB / RB, LT / RT (L1 / R1, L2 / R2)
   12: 'up', 13: 'down', 14: 'left', 15: 'right',
 };

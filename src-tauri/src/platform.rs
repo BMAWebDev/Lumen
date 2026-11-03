@@ -53,6 +53,7 @@ pub(crate) mod win {
     pub const TH32CS_SNAPPROCESS: u32 = 0x2;
     pub const PROCESS_TERMINATE: u32 = 0x0001;
     pub const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    pub const PROCESS_SUSPEND_RESUME: u32 = 0x0800;
 
     #[repr(C)]
     pub struct ProcessEntry32W {
@@ -99,6 +100,12 @@ pub(crate) mod win {
         pub fn LoadLibraryW(name: *const u16) -> HANDLE;
         pub fn GetProcAddress(module: HANDLE, name: *const u8) -> *const c_void;
         pub fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+    }
+
+    #[link(name = "ntdll")]
+    extern "system" {
+        pub fn NtSuspendProcess(h: HANDLE) -> i32;
+        pub fn NtResumeProcess(h: HANDLE) -> i32;
     }
 
     #[link(name = "user32")]
@@ -195,6 +202,27 @@ pub fn kill(pid: u32) {
 #[cfg(not(windows))]
 pub fn kill(_pid: u32) {}
 
+/// Pune în pauză (sau reia) toate firele unui proces. Un joc fără focus primește
+/// totuși input de la controler, așa că cât meniul e deschis îl înghețăm.
+#[cfg(windows)]
+pub fn set_suspended(pid: u32, suspend: bool) -> bool {
+    use win::*;
+    unsafe {
+        let h = OpenProcess(PROCESS_SUSPEND_RESUME, 0, pid);
+        if h == 0 {
+            return false;
+        }
+        let status = if suspend { NtSuspendProcess(h) } else { NtResumeProcess(h) };
+        CloseHandle(h);
+        status >= 0
+    }
+}
+
+#[cfg(not(windows))]
+pub fn set_suspended(_pid: u32, _suspend: bool) -> bool {
+    false
+}
+
 /// Aduce fereastra lansatorului în prim-plan, chiar dacă un joc are focusul.
 pub fn bring_to_front(w: &tauri::WebviewWindow) {
     let _ = w.unminimize();
@@ -222,11 +250,18 @@ pub fn bring_to_front(w: &tauri::WebviewWindow) {
 /// Readuce în prim-plan fereastra principală a unuia dintre procese (cea mai mare
 /// fereastră vizibilă, fără proprietar), restaurând-o dacă e minimizată.
 /// Întoarce `false` dacă procesele nu au nicio fereastră.
-#[cfg(windows)]
 pub fn focus_window_of(pids: &[u32]) -> bool {
+    focus_window(pids, (0, 0))
+}
+
+/// Ca `focus_window_of`, dar ignoră ferestrele mai mici decât `min` (lățime, înălțime):
+/// splash-urile și launcherele unui joc nu sunt fereastra jocului.
+#[cfg(windows)]
+pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
     use win::*;
     struct Search<'a> {
         pids: &'a [u32],
+        min: (i32, i32),
         best: isize,
         area: i64,
     }
@@ -239,6 +274,9 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
         if s.pids.contains(&pid) && unsafe { IsWindowVisible(hwnd) } != 0 && unsafe { GetWindow(hwnd, GW_OWNER) } == 0 {
             let mut r = Rect::default();
             unsafe { GetWindowRect(hwnd, &mut r) };
+            if r.right - r.left < s.min.0 || r.bottom - r.top < s.min.1 {
+                return 1;
+            }
             // O fereastră minimizată are dreptunghiul mic, dar tot e un candidat.
             let area = ((r.right - r.left) as i64 * (r.bottom - r.top) as i64).max(1);
             if area > s.area {
@@ -248,7 +286,7 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
         }
         1
     }
-    let mut s = Search { pids, best: 0, area: 0 };
+    let mut s = Search { pids, min, best: 0, area: 0 };
     unsafe { EnumWindows(visit, &mut s as *mut Search as isize) };
     if s.best == 0 {
         return false;
@@ -265,7 +303,7 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn focus_window_of(_pids: &[u32]) -> bool {
+pub fn focus_window(_pids: &[u32], _min: (i32, i32)) -> bool {
     false
 }
 
@@ -348,8 +386,14 @@ pub fn open_uri(uri: &str) -> Result<(), String> {
 #[cfg(windows)]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
+/// Windows întârzie cu câteva secunde aplicațiile din cheia `Run`. Un task la logon
+/// pornește imediat, deci autostart-ul folosește Task Scheduler.
 #[cfg(windows)]
-pub fn autostart_enabled() -> bool {
+const TASK_NAME: &str = "Lumen";
+
+/// Autostart-ul vechi, prin registry. Doar pentru migrarea către task.
+#[cfg(windows)]
+pub fn legacy_autostart_enabled() -> bool {
     hidden("reg")
         .args(["query", RUN_KEY, "/v", "Lumen"])
         .output()
@@ -358,18 +402,36 @@ pub fn autostart_enabled() -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn autostart_enabled() -> bool {
+pub fn legacy_autostart_enabled() -> bool {
     false
 }
 
 #[cfg(windows)]
 pub fn set_autostart(on: bool) -> Result<(), String> {
     if on {
+        if cfg!(debug_assertions) {
+            return Err("Pornirea cu Windows se activează doar din versiunea instalată.".into());
+        }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let value = format!("\"{}\"", exe.display());
-        run(hidden("reg").args(["add", RUN_KEY, "/v", "Lumen", "/t", "REG_SZ", "/d", value.as_str(), "/f"]))
+        let q = |s: &str| s.replace('\'', "''");
+        let dir = q(&exe.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+        let exe = q(&exe.to_string_lossy());
+        // Prioritatea 4 (normală): implicit un task rulează cu 7, adică mai lent.
+        let script = format!(
+            "$ErrorActionPreference = 'Stop';              $a = New-ScheduledTaskAction -Execute '{exe}' -WorkingDirectory '{dir}';              $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;              $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries                   -ExecutionTimeLimit ([TimeSpan]::Zero) -Priority 4;              $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited;              Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null;              'ok'"
+        );
+        let out = powershell(&script)?;
+        if !out.contains("ok") {
+            return Err("Nu s-a putut crea task-ul de pornire.".into());
+        }
+        let _ = hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]).status();
+        Ok(())
     } else {
-        run(hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]))
+        let _ = powershell(&format!(
+            "Unregister-ScheduledTask -TaskName '{TASK_NAME}' -Confirm:$false -ErrorAction SilentlyContinue"
+        ));
+        let _ = hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]).status();
+        Ok(())
     }
 }
 

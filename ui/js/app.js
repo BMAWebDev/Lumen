@@ -730,6 +730,7 @@ function openSettings() {
     items: [
       toggle('autostart', 'Pornește odată cu Windows', 'Lumen se deschide în ecran complet după autentificare'),
       toggle('minimizeOnLaunch', 'Minimizează când pornește un joc', 'Lumen revine singur după ce închizi jocul'),
+      toggle('pauseGame', 'Pune jocul în pauză în meniu', 'Îngheață jocul cât Lumen e deschis peste el, ca butoanele să nu ajungă în joc'),
       toggle('sounds', 'Sunete în meniu'),
       toggle('music', 'Muzică de fundal', S.theme.music ? '' : 'Adaugă un fișier music.mp3 în folderul temei'),
       toggle('onlineArt', 'Imagini online pentru Steam', 'Descarcă coperțile care lipsesc din cache-ul Steam'),
@@ -986,9 +987,17 @@ function openQuick() {
   });
 }
 
+/** Așteaptă să fie eliberate butoanele controlerului (maxim 2 s). Altfel apăsarea care a ales
+ *  „Înapoi la joc” rămâne apăsată și când jocul primește focusul, iar jocul o ia drept a lui. */
+async function padsReleased() {
+  const pressed = () => [...(navigator.getGamepads?.() || [])].some((p) => p?.buttons.some((b) => b.pressed));
+  for (let i = 0; i < 40 && pressed(); i++) await new Promise((r) => setTimeout(r, 50));
+}
+
 /** Readuce jocul pornit în față; Lumen se minimizează. */
 async function resumeGame() {
   try {
+    await padsReleased();
     await call('resume_game');
     closeAll();
   } catch (e) {

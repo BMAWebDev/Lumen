@@ -95,8 +95,7 @@ fn theme_files(dir: &Path) -> HashMap<String, String> {
 #[tauri::command]
 fn get_state(state: State<'_, AppState>) -> Result<Snapshot, String> {
     let s = state.inner.lock().map_err(lock_err)?;
-    let mut settings = s.settings.clone();
-    settings.autostart = platform::autostart_enabled();
+    let settings = s.settings.clone();
     let tdir = theme_dir(&s.data_dir);
     Ok(Snapshot {
         games: s.games.clone(),
@@ -188,14 +187,17 @@ fn close_game(app: AppHandle) -> Result<bool, String> {
     launcher::close_running(&app)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<Settings, String> {
     if key == "autostart" {
         platform::set_autostart(value)?;
-    } else {
+    }
+    {
         let mut s = state.inner.lock().map_err(lock_err)?;
         match key.as_str() {
+            "autostart" => s.settings.autostart = value,
             "minimizeOnLaunch" => s.settings.minimize_on_launch = value,
+            "pauseGame" => s.settings.pause_game = value,
             "sounds" => s.settings.sounds = value,
             "music" => s.settings.music = value,
             "onlineArt" => s.settings.online_art = value,
@@ -203,11 +205,8 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
             _ => return Err(format!("Setare necunoscută: {key}")),
         }
         store::save(&s.data_dir, "settings.json", &s.settings);
+        Ok(s.settings.clone())
     }
-    let s = state.inner.lock().map_err(lock_err)?;
-    let mut settings = s.settings.clone();
-    settings.autostart = platform::autostart_enabled();
-    Ok(settings)
 }
 
 /// Alege un folder cu jocuri (fereastra de sistem) și îl adaugă în setări.
@@ -228,9 +227,7 @@ fn add_game_folder(app: AppHandle) -> Result<Option<Settings>, String> {
         s.settings.game_folders.push(path);
         store::save(&s.data_dir, "settings.json", &s.settings);
     }
-    let mut settings = s.settings.clone();
-    settings.autostart = platform::autostart_enabled();
-    Ok(Some(settings))
+    Ok(Some(s.settings.clone()))
 }
 
 /// Alege un executabil și îl adaugă în bibliotecă. Întoarce numele jocului,
@@ -316,9 +313,7 @@ fn remove_game_folder(state: State<'_, AppState>, path: String) -> Result<Settin
     let mut s = state.inner.lock().map_err(lock_err)?;
     s.settings.game_folders.retain(|f| f != &path);
     store::save(&s.data_dir, "settings.json", &s.settings);
-    let mut settings = s.settings.clone();
-    settings.autostart = platform::autostart_enabled();
-    Ok(settings)
+    Ok(s.settings.clone())
 }
 
 /// Deschide un folder în Explorer (locația unui joc sau folderul temei).
@@ -378,6 +373,25 @@ fn exit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Autostart-ul făcut de versiunile vechi (cheia `Run`) devine task la logon, care pornește
+/// fără întârzierea pe care Windows o aplică aplicațiilor din `Run`.
+fn migrate_autostart(app: AppHandle) {
+    // Un build de dezvoltare ar înregistra propriul executabil (cu consolă), nu pe cel instalat.
+    if cfg!(debug_assertions) {
+        return;
+    }
+    thread::spawn(move || {
+        if !platform::legacy_autostart_enabled() || platform::set_autostart(true).is_err() {
+            return;
+        }
+        let state = app.state::<AppState>();
+        if let Ok(mut s) = state.inner.lock() {
+            s.settings.autostart = true;
+            store::save(&s.data_dir, "settings.json", &s.settings);
+        };
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -398,6 +412,7 @@ fn main() {
             };
             app.manage(AppState { inner: Mutex::new(inner) });
             guide::start(app.handle().clone());
+            migrate_autostart(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -425,6 +440,17 @@ fn main() {
             power,
             exit_app
         ])
-        .run(tauri::generate_context!())
-        .expect("Lumen nu a putut porni");
+        .on_window_event(|_, event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                launcher::unpause_after_blur();
+            }
+        })
+        .build(tauri::generate_context!())
+        .expect("Lumen nu a putut porni")
+        .run(|_, event| {
+            // Un joc rămas înghețat după ieșirea din Lumen n-ar mai putea fi reluat.
+            if let tauri::RunEvent::Exit = event {
+                launcher::unpause();
+            }
+        });
 }

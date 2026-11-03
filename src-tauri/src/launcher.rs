@@ -1,5 +1,6 @@
 //! Pornirea jocurilor și urmărirea lor până la închidere.
 
+use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,6 +12,12 @@ use crate::{platform, store, util};
 
 /// Cât așteptăm ca jocul să apară după lansare (Steam poate avea nevoie să pornească întâi).
 const START_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Cât așteptăm fereastra jocului după ce îi apare procesul, înainte să minimizăm oricum.
+const WINDOW_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Dimensiunea minimă a ferestrei care contează ca fereastra jocului (nu splash sau launcher).
+const GAME_WINDOW_MIN: (i32, i32) = (640, 400);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +91,7 @@ pub fn close_running(app: &AppHandle) -> Result<bool, String> {
         }
         (dir, pending)
     };
+    unpause();
     if let Some(dir) = &dir {
         for pid in platform::procs_under(dir) {
             platform::kill(pid);
@@ -92,8 +100,55 @@ pub fn close_running(app: &AppHandle) -> Result<bool, String> {
     Ok(pending || dir.is_none())
 }
 
+/// Procesele jocului puse în pauză cât meniul Lumen e deschis peste el, cu momentul pauzei.
+static PAUSED: Mutex<Option<(Vec<u32>, Instant)>> = Mutex::new(None);
+
+/// Cât după pauză ignorăm pierderea focusului: aducerea ferestrei în față o poate zgudui.
+const PAUSE_SETTLE: Duration = Duration::from_millis(800);
+
+/// Îngheață jocul care rulează, ca apăsările din meniul Lumen să nu ajungă și în el.
+pub fn pause(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let dir = {
+        let Ok(s) = state.inner.lock() else { return };
+        if !s.settings.pause_game {
+            return;
+        }
+        let Some(r) = s.running.as_ref().filter(|r| r.started) else { return };
+        s.games.iter().find(|g| g.id == r.id).map(|g| g.install_dir.clone())
+    };
+    let Some(dir) = dir else { return };
+    let Ok(mut paused) = PAUSED.lock() else { return };
+    if paused.is_some() {
+        return;
+    }
+    let pids: Vec<u32> = platform::procs_under(&dir).into_iter().filter(|&p| platform::set_suspended(p, true)).collect();
+    if !pids.is_empty() {
+        *paused = Some((pids, Instant::now()));
+    }
+}
+
+/// Reia jocul pus în pauză de `pause`.
+pub fn unpause() {
+    let Ok(mut paused) = PAUSED.lock() else { return };
+    if let Some((pids, _)) = paused.take() {
+        for pid in pids {
+            platform::set_suspended(pid, false);
+        }
+    }
+}
+
+/// Lumen a pierdut focusul (alt-tab, jocul adus în față): jocul nu mai are de ce să stea înghețat.
+pub fn unpause_after_blur() {
+    let settled = PAUSED.lock().is_ok_and(|p| p.as_ref().is_some_and(|(_, at)| at.elapsed() > PAUSE_SETTLE));
+    if settled {
+        unpause();
+    }
+}
+
 /// Readuce jocul care rulează în prim-plan și minimizează Lumen.
 pub fn resume(app: &AppHandle) -> Result<(), String> {
+    unpause();
     let state = app.state::<AppState>();
     let dir = {
         let s = state.inner.lock().map_err(|_| "Starea aplicației este blocată.")?;
@@ -142,6 +197,26 @@ fn watch(app: AppHandle, game: Game, minimize: bool) {
         }
     }
 
+    // Lumen rămâne pe ecran cât jocul se încarcă și se minimizează abia când jocul are o
+    // fereastră, adusă în față înainte; altfel s-ar vedea desktopul între ele.
+    let mut covered = false;
+    if minimize {
+        let window_deadline = Instant::now() + WINDOW_TIMEOUT;
+        loop {
+            if !is_current(&app, &game.id) {
+                return; // lansare anulată
+            }
+            if platform::focus_window(&platform::procs_under(&game.install_dir), GAME_WINDOW_MIN) {
+                covered = true;
+                break;
+            }
+            if Instant::now() > window_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(400));
+        }
+    }
+
     {
         let state = app.state::<AppState>();
         if let Ok(mut s) = state.inner.lock() {
@@ -152,6 +227,9 @@ fn watch(app: AppHandle, game: Game, minimize: bool) {
     }
     let _ = app.emit("game-started", GameEvent { id: game.id.clone(), seconds: 0, detected: true });
     if minimize {
+        if covered {
+            thread::sleep(Duration::from_millis(400)); // lasă jocul să preia ecranul
+        }
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.minimize();
         }
@@ -173,6 +251,7 @@ fn watch(app: AppHandle, game: Game, minimize: bool) {
         }
     }
     let seconds = start.elapsed().as_secs().saturating_sub(4);
+    unpause(); // procesele au dispărut; nu păstrăm PID-uri care pot fi refolosite
 
     {
         let state = app.state::<AppState>();
