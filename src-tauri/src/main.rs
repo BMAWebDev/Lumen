@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod art;
+mod audio;
 mod guide;
 mod launcher;
 mod local;
@@ -9,6 +10,7 @@ mod pads;
 mod platform;
 mod steam;
 mod store;
+mod uninstall;
 mod util;
 mod vdf;
 mod xbox;
@@ -280,6 +282,19 @@ fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Dezinstalează un joc. Xbox rulează `Remove-AppxPackage` (câteva secunde), deci în afara firului principal.
+#[tauri::command(async)]
+fn uninstall_game(state: State<'_, AppState>, id: String) -> Result<uninstall::Outcome, String> {
+    let game = {
+        let s = state.inner.lock().map_err(lock_err)?;
+        if s.running.as_ref().is_some_and(|r| r.id == id) {
+            return Err("Închide jocul înainte să-l dezinstalezi.".into());
+        }
+        s.games.iter().find(|g| g.id == id).cloned().ok_or("Jocul nu mai există în bibliotecă.")?
+    };
+    uninstall::run(&game)
+}
+
 #[tauri::command]
 fn hidden_games(state: State<'_, AppState>) -> Result<Vec<HiddenGame>, String> {
     let s = state.inner.lock().map_err(lock_err)?;
@@ -340,6 +355,17 @@ fn pad_batteries() -> Vec<pads::PadBattery> {
     pads::batteries()
 }
 
+/// Enumerarea COM + compilarea C# din PowerShell durează ~1 s, deci rulează în afara firului principal.
+#[tauri::command(async)]
+fn audio_outputs() -> Result<Vec<audio::AudioDevice>, String> {
+    audio::outputs()
+}
+
+#[tauri::command(async)]
+fn set_audio_output(id: String) -> Result<(), String> {
+    audio::set_output(&id)
+}
+
 #[tauri::command]
 fn power(action: String) {
     thread::spawn(move || {
@@ -387,12 +413,15 @@ fn main() {
             remove_game_folder,
             add_game,
             remove_game,
+            uninstall_game,
             hidden_games,
             restore_game,
             open_path,
             theme_file,
             battery,
             pad_batteries,
+            audio_outputs,
+            set_audio_output,
             power,
             exit_app
         ])

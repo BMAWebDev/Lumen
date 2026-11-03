@@ -63,44 +63,41 @@ fn sony() -> Vec<PadBattery> {
             continue;
         }
         let Ok(dev) = info.open_device(&api) else { continue };
-        if let Some(b) = read_sony(&dev, model) {
+        if let Some(b) = read_sony(&dev, model, is_bluetooth(info)) {
             out.push(b);
         }
     }
     out
 }
 
+/// Conexiunea trebuie aflată de la dispozitiv, nu din lungimea raportului: pe Bluetooth,
+/// Windows completează raportul scurt cu zerouri până la lungimea celui mai mare raport.
+#[cfg(windows)]
+fn is_bluetooth(info: &hidapi::DeviceInfo) -> bool {
+    matches!(info.bus_type(), hidapi::BusType::Bluetooth)
+}
+
 /// Citește un raport de intrare și extrage starea bateriei.
 #[cfg(windows)]
-fn read_sony(dev: &hidapi::HidDevice, model: Sony) -> Option<PadBattery> {
+fn read_sony(dev: &hidapi::HidDevice, model: Sony, bt: bool) -> Option<PadBattery> {
     let mut buf = [0u8; 128];
-    for attempt in 0..2 {
-        let n = dev.read_timeout(&mut buf, 250).ok()?;
-        if n == 0 {
-            return None;
-        }
-        // Raportul complet are bateria la un offset fix:
-        //   DualSense: USB 0x01 → 53, Bluetooth 0x31 → 54
-        //   DualShock 4: USB 0x01 → 30, Bluetooth 0x11 → 32
-        let status = match (model, buf[0]) {
-            (Sony::DualSense, 0x01) if n >= 64 => buf[53],
-            (Sony::DualSense, 0x31) if n >= 55 => buf[54],
-            (Sony::DualShock4, 0x01) if n >= 64 => buf[30],
-            (Sony::DualShock4, 0x11) if n >= 33 => buf[32],
-            _ => {
-                // Pe Bluetooth controlerul trimite la început doar un raport scurt, fără
-                // baterie; citirea raportului de calibrare (0x05) îl trece pe cel complet.
-                if attempt == 0 {
-                    let mut feat = [0u8; 41];
-                    feat[0] = 0x05;
-                    let _ = dev.get_feature_report(&mut feat);
-                }
-                continue;
-            }
-        };
-        return parse_sony(model, status);
-    }
-    None
+    let n = dev.read_timeout(&mut buf, 250).ok()?;
+    // Raportul complet are bateria la un offset fix:
+    //   DualSense: USB 0x01 → 53, Bluetooth 0x31 → 54
+    //   DualShock 4: USB 0x01 → 30, Bluetooth 0x11 → 32
+    // Pe Bluetooth, controlerul trimite implicit doar raportul scurt (0x01), fără baterie.
+    // NU îl trecem noi pe raportul complet (prin raportul de calibrare 0x05): modul acela
+    // rămâne activ până la oprirea controlerului, iar Windows și Gamepad API din WebView2
+    // nu-l înțeleg, așa că navigarea în Lumen ar îngheța. Afișăm bateria doar dacă alt
+    // program (de ex. Steam) a trecut deja controlerul pe raportul complet.
+    let status = match (model, bt, buf[0]) {
+        (Sony::DualSense, false, 0x01) if n >= 64 => buf[53],
+        (Sony::DualSense, true, 0x31) if n >= 55 => buf[54],
+        (Sony::DualShock4, false, 0x01) if n >= 64 => buf[30],
+        (Sony::DualShock4, true, 0x11) if n >= 33 => buf[32],
+        _ => return None,
+    };
+    parse_sony(model, status)
 }
 
 #[cfg(windows)]
@@ -131,14 +128,17 @@ fn parse_sony(model: Sony, status: u8) -> Option<PadBattery> {
 /// Urmărește butonul PS pe toate controlerele Sony și apelează `on_press` la fiecare
 /// apăsare. Rulează pe un fir propriu, la nesfârșit; funcționează și cu un joc în față,
 /// pentru că Windows permite mai multor aplicații să citească același controler.
+/// Când apare un dongle DS5 Bridge capabil de predare, îi cere să cedeze controlerul
+/// Bluetooth-ului din PC și apelează `on_handoff`.
 #[cfg(windows)]
-pub fn watch_ps_button(on_press: impl Fn()) {
+pub fn watch_ps_button(on_press: impl Fn(), on_handoff: impl Fn()) {
     use std::time::{Duration, Instant};
 
     struct Pad {
         dev: hidapi::HidDevice,
         path: std::ffi::CString,
         model: Sony,
+        bt: bool,
         down: bool,
     }
     let Ok(mut api) = hidapi::HidApi::new() else { return };
@@ -158,7 +158,11 @@ pub fn watch_ps_button(on_press: impl Fn()) {
                         continue;
                     }
                     if let Ok(dev) = info.open_device(&api) {
-                        pads.push(Pad { dev, path: info.path().to_owned(), model, down: false });
+                        let bt = is_bluetooth(info);
+                        if !bt && bridge_release(&dev) {
+                            on_handoff();
+                        }
+                        pads.push(Pad { dev, path: info.path().to_owned(), model, bt, down: false });
                     }
                 }
             }
@@ -172,7 +176,7 @@ pub fn watch_ps_button(on_press: impl Fn()) {
             match p.dev.read_timeout(&mut buf, 0) {
                 Ok(0) => break true,
                 Ok(n) => {
-                    if let Some(down) = ps_pressed(p.model, &buf[..n]) {
+                    if let Some(down) = ps_pressed(p.model, p.bt, &buf[..n]) {
                         if down && !p.down {
                             on_press();
                         }
@@ -187,18 +191,38 @@ pub fn watch_ps_button(on_press: impl Fn()) {
 }
 
 #[cfg(not(windows))]
-pub fn watch_ps_button(_on_press: impl Fn()) {}
+pub fn watch_ps_button(_on_press: impl Fn(), _on_handoff: impl Fn()) {}
+
+/// Dongle-ul DS5 Bridge (Pico 2 W) se prezintă pe USB ca un DualSense. Firmware-ul cu
+/// predare își marchează versiunea (raportul 0xF8) cu „+handoff” când știe adresa și cheia
+/// Bluetooth-ului din PC; atunci comanda 0x11 (pe raportul 0xF6) îl face să elibereze
+/// controlerul și să-și oprească Bluetooth-ul până când PC-ul intră în repaus.
+/// Un DualSense real pe cablu nu are aceste rapoarte, deci nu e afectat.
+#[cfg(windows)]
+fn bridge_release(dev: &hidapi::HidDevice) -> bool {
+    let mut version = [0u8; 64];
+    version[0] = 0xF8;
+    let Ok(n) = dev.get_feature_report(&mut version) else { return false };
+    let text = String::from_utf8_lossy(&version[1..n.min(64)]);
+    if !text.trim_end_matches('\0').ends_with("+handoff") {
+        return false;
+    }
+    let mut cmd = [0u8; 64];
+    cmd[0] = 0xF6;
+    cmd[1] = 0x11;
+    dev.send_feature_report(&cmd).is_ok()
+}
 
 /// Starea butonului PS dintr-un raport de intrare (bitul 0 al celui de-al treilea
-/// octet de butoane). Raportul scurt de Bluetooth (0x01, ~10 octeți) are aceeași
-/// structură ca raportul USB al DualShock 4.
+/// octet de butoane). Raportul scurt de Bluetooth (0x01) are aceeași structură ca
+/// raportul USB al DualShock 4.
 #[cfg(windows)]
-fn ps_pressed(model: Sony, r: &[u8]) -> Option<bool> {
-    let byte = match (model, r.first()?) {
-        (Sony::DualSense, 0x01) if r.len() >= 64 => r[10],
-        (Sony::DualSense, 0x31) => *r.get(11)?,
-        (_, 0x01) => *r.get(7)?,
-        (Sony::DualShock4, 0x11) => *r.get(9)?,
+fn ps_pressed(model: Sony, bt: bool, r: &[u8]) -> Option<bool> {
+    let byte = match (model, bt, r.first()?) {
+        (Sony::DualSense, false, 0x01) => *r.get(10)?,
+        (Sony::DualSense, true, 0x31) => *r.get(11)?,
+        (Sony::DualShock4, true, 0x11) => *r.get(9)?,
+        (_, _, 0x01) => *r.get(7)?,
         _ => return None,
     };
     Some(byte & 0x01 != 0)

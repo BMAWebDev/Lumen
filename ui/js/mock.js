@@ -102,6 +102,8 @@ DATA.forEach(([, , , , , ago, play], i) => {
 });
 const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
 let running = null;
+let audioOut = 'a';
+const AUDIO = [['a', 'Difuzoare (Realtek Audio)'], ['b', 'Căști (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
 let hidden = [];
 const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
@@ -155,10 +157,23 @@ export async function invoke(cmd, args) {
       else hidden.push({ id: args.id, name: games[i].name });
       return;
     }
+    case 'uninstall_game': {
+      const g = games.find((x) => x.id === args.id);
+      if (!g) throw new Error('Jocul nu mai există în bibliotecă.');
+      if (g.source === 'local') throw new Error('Jocul nu are dezinstalator. Deschide locația jocului și șterge folderul manual.');
+      if (g.source === 'steam') return { done: false, message: 'Confirmă dezinstalarea în fereastra Steam, apoi reîmprospătează biblioteca.' };
+      games.splice(games.indexOf(g), 1);
+      return { done: true, message: `${g.name} a fost dezinstalat.` };
+    }
     case 'hidden_games':
       return [...hidden];
     case 'restore_game':
       hidden = hidden.filter((h) => h.id !== args.id);
+      return;
+    case 'audio_outputs':
+      return AUDIO.map(([id, name]) => ({ id, name, current: id === audioOut }));
+    case 'set_audio_output':
+      audioOut = args.id;
       return;
     case 'theme_file':
       throw new Error('fără temă');

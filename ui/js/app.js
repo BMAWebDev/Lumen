@@ -642,6 +642,7 @@ scrim.addEventListener('click', () => { const t = stack[stack.length - 1]; if (t
 
 function syncScrim() {
   scrim.classList.toggle('show', stack.some((o) => o.type !== 'launch'));
+  document.body.classList.toggle('panel-open', stack[stack.length - 1]?.type === 'panel');
   updateHints();
 }
 
@@ -733,6 +734,7 @@ function openSettings() {
       toggle('music', 'Muzică de fundal', S.theme.music ? '' : 'Adaugă un fișier music.mp3 în folderul temei'),
       toggle('onlineArt', 'Imagini online pentru Steam', 'Descarcă coperțile care lipsesc din cache-ul Steam'),
       toggle('reduceMotion', 'Reduce animațiile'),
+      { label: 'Ieșire audio', desc: 'Alege difuzoarele, căștile sau televizorul folosite de Windows', action: openAudioOutputs },
       { label: 'Adaugă un joc', desc: 'Alege executabilul (.exe) unui joc din afara Steam și Xbox', action: addGame },
       {
         label: 'Foldere cu jocuri',
@@ -778,6 +780,49 @@ function removeGame(g) {
       toast(String(e), 'error');
     }
   });
+}
+
+// Schimbă dispozitivul audio implicit al Windows, deci se aplică și jocurilor.
+async function openAudioOutputs() {
+  let devices = [];
+  try { devices = (await call('audio_outputs')) || []; } catch (e) { toast(String(e), 'error'); return; }
+  pushOverlay(listPanel({
+    title: 'Ieșire audio',
+    note: devices.length ? 'Alege unde se aude sunetul de la Windows și de la jocuri.' : 'Nu am găsit niciun dispozitiv audio.',
+    items: devices.map((d) => ({
+      label: d.name,
+      toggle: () => d.current,
+      action: async () => {
+        if (d.current) return;
+        try {
+          await call('set_audio_output', { id: d.id });
+          devices.forEach((x) => { x.current = x.id === d.id; });
+          toast(`Sunetul merge acum pe ${d.name}.`);
+        } catch (e) { toast(String(e), 'error'); }
+      },
+    })),
+  }));
+}
+
+// Steam și jocurile cu dezinstalator își cer confirmarea în propria fereastră; Xbox se dezinstalează direct.
+function uninstallGame(g) {
+  const run = async () => {
+    try {
+      toast(`Se dezinstalează ${g.name}…`);
+      const r = await call('uninstall_game', { id: g.id });
+      closeAll();
+      if (r.done) {
+        S.games = S.games.filter((x) => x.id !== g.id);
+        renderRow();
+        renderLibrary();
+      }
+      toast(r.message);
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  };
+  if (g.source !== 'xbox') { run(); return; }
+  confirmPanel(`Dezinstalezi ${g.name}?`, 'Jocul și fișierele lui sunt șterse de pe disc.', 'Dezinstalează', run);
 }
 
 async function openHiddenGames() {
@@ -860,8 +905,8 @@ function openGameOptions(g) {
       ? { label: 'Închide jocul', danger: true, action: () => { closeTop(true); askCloseGame(); } }
       : { label: 'Joacă', action: () => { closeTop(true); launch(g); } },
     { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
-    { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
   ];
+  if (!running) items.push({ label: 'Dezinstalează', danger: true, action: () => uninstallGame(g) });
   if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
   // Jocul pornit se poate închide din opțiunile oricărui joc din bibliotecă.
   const other = !running && gameById(S.running?.id);
@@ -1207,6 +1252,8 @@ async function boot() {
     if (top?.type === 'quick') { if (S.running?.started) resumeGame(); else closeTop(); }
     else openQuick();
   });
+  // Dongle-ul DS5 Bridge a cedat controlerul: următoarea apăsare pe PS îl conectează la PC.
+  on('pad-handoff', () => toast('Apasă PS ca să conectezi controlerul la Bluetooth-ul PC-ului.'));
   on('game-started', ({ id }) => {
     S.running = { id, started: true };
     launchOverlay?.box.classList.add('started');
