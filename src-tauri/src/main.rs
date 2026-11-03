@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod art;
+mod audio;
 mod guide;
 mod launcher;
 mod local;
@@ -340,6 +341,17 @@ fn pad_batteries() -> Vec<pads::PadBattery> {
     pads::batteries()
 }
 
+/// Enumerarea COM + compilarea C# din PowerShell durează ~1 s, deci rulează în afara firului principal.
+#[tauri::command(async)]
+fn audio_outputs() -> Result<Vec<audio::AudioDevice>, String> {
+    audio::outputs()
+}
+
+#[tauri::command(async)]
+fn set_audio_output(id: String) -> Result<(), String> {
+    audio::set_output(&id)
+}
+
 #[tauri::command]
 fn power(action: String) {
     thread::spawn(move || {
@@ -393,6 +405,8 @@ fn main() {
             theme_file,
             battery,
             pad_batteries,
+            audio_outputs,
+            set_audio_output,
             power,
             exit_app
         ])

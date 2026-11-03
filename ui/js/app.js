@@ -734,6 +734,7 @@ function openSettings() {
       toggle('music', 'Muzică de fundal', S.theme.music ? '' : 'Adaugă un fișier music.mp3 în folderul temei'),
       toggle('onlineArt', 'Imagini online pentru Steam', 'Descarcă coperțile care lipsesc din cache-ul Steam'),
       toggle('reduceMotion', 'Reduce animațiile'),
+      { label: 'Ieșire audio', desc: 'Alege difuzoarele, căștile sau televizorul folosite de Windows', action: openAudioOutputs },
       { label: 'Adaugă un joc', desc: 'Alege executabilul (.exe) unui joc din afara Steam și Xbox', action: addGame },
       {
         label: 'Foldere cu jocuri',
@@ -779,6 +780,28 @@ function removeGame(g) {
       toast(String(e), 'error');
     }
   });
+}
+
+// Schimbă dispozitivul audio implicit al Windows, deci se aplică și jocurilor.
+async function openAudioOutputs() {
+  let devices = [];
+  try { devices = (await call('audio_outputs')) || []; } catch (e) { toast(String(e), 'error'); return; }
+  pushOverlay(listPanel({
+    title: 'Ieșire audio',
+    note: devices.length ? 'Alege unde se aude sunetul de la Windows și de la jocuri.' : 'Nu am găsit niciun dispozitiv audio.',
+    items: devices.map((d) => ({
+      label: d.name,
+      toggle: () => d.current,
+      action: async () => {
+        if (d.current) return;
+        try {
+          await call('set_audio_output', { id: d.id });
+          devices.forEach((x) => { x.current = x.id === d.id; });
+          toast(`Sunetul merge acum pe ${d.name}.`);
+        } catch (e) { toast(String(e), 'error'); }
+      },
+    })),
+  }));
 }
 
 async function openHiddenGames() {

@@ -102,6 +102,8 @@ DATA.forEach(([, , , , , ago, play], i) => {
 });
 const settings = { minimizeOnLaunch: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
 let running = null;
+let audioOut = 'a';
+const AUDIO = [['a', 'Difuzoare (Realtek Audio)'], ['b', 'Căști (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
 let hidden = [];
 const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
@@ -159,6 +161,11 @@ export async function invoke(cmd, args) {
       return [...hidden];
     case 'restore_game':
       hidden = hidden.filter((h) => h.id !== args.id);
+      return;
+    case 'audio_outputs':
+      return AUDIO.map(([id, name]) => ({ id, name, current: id === audioOut }));
+    case 'set_audio_output':
+      audioOut = args.id;
       return;
     case 'theme_file':
       throw new Error('fără temă');
