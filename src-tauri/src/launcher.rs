@@ -13,6 +13,12 @@ use crate::{platform, store, util};
 /// Cât așteptăm ca jocul să apară după lansare (Steam poate avea nevoie să pornească întâi).
 const START_TIMEOUT: Duration = Duration::from_secs(180);
 
+/// Cât așteptăm fereastra jocului după ce îi apare procesul, înainte să minimizăm oricum.
+const WINDOW_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Dimensiunea minimă a ferestrei care contează ca fereastra jocului (nu splash sau launcher).
+const GAME_WINDOW_MIN: (i32, i32) = (640, 400);
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GameEvent {
@@ -191,6 +197,26 @@ fn watch(app: AppHandle, game: Game, minimize: bool) {
         }
     }
 
+    // Lumen rămâne pe ecran cât jocul se încarcă și se minimizează abia când jocul are o
+    // fereastră, adusă în față înainte; altfel s-ar vedea desktopul între ele.
+    let mut covered = false;
+    if minimize {
+        let window_deadline = Instant::now() + WINDOW_TIMEOUT;
+        loop {
+            if !is_current(&app, &game.id) {
+                return; // lansare anulată
+            }
+            if platform::focus_window(&platform::procs_under(&game.install_dir), GAME_WINDOW_MIN) {
+                covered = true;
+                break;
+            }
+            if Instant::now() > window_deadline {
+                break;
+            }
+            thread::sleep(Duration::from_millis(400));
+        }
+    }
+
     {
         let state = app.state::<AppState>();
         if let Ok(mut s) = state.inner.lock() {
@@ -201,6 +227,9 @@ fn watch(app: AppHandle, game: Game, minimize: bool) {
     }
     let _ = app.emit("game-started", GameEvent { id: game.id.clone(), seconds: 0, detected: true });
     if minimize {
+        if covered {
+            thread::sleep(Duration::from_millis(400)); // lasă jocul să preia ecranul
+        }
         if let Some(w) = app.get_webview_window("main") {
             let _ = w.minimize();
         }

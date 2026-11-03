@@ -250,11 +250,18 @@ pub fn bring_to_front(w: &tauri::WebviewWindow) {
 /// Readuce în prim-plan fereastra principală a unuia dintre procese (cea mai mare
 /// fereastră vizibilă, fără proprietar), restaurând-o dacă e minimizată.
 /// Întoarce `false` dacă procesele nu au nicio fereastră.
-#[cfg(windows)]
 pub fn focus_window_of(pids: &[u32]) -> bool {
+    focus_window(pids, (0, 0))
+}
+
+/// Ca `focus_window_of`, dar ignoră ferestrele mai mici decât `min` (lățime, înălțime):
+/// splash-urile și launcherele unui joc nu sunt fereastra jocului.
+#[cfg(windows)]
+pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
     use win::*;
     struct Search<'a> {
         pids: &'a [u32],
+        min: (i32, i32),
         best: isize,
         area: i64,
     }
@@ -267,6 +274,9 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
         if s.pids.contains(&pid) && unsafe { IsWindowVisible(hwnd) } != 0 && unsafe { GetWindow(hwnd, GW_OWNER) } == 0 {
             let mut r = Rect::default();
             unsafe { GetWindowRect(hwnd, &mut r) };
+            if r.right - r.left < s.min.0 || r.bottom - r.top < s.min.1 {
+                return 1;
+            }
             // O fereastră minimizată are dreptunghiul mic, dar tot e un candidat.
             let area = ((r.right - r.left) as i64 * (r.bottom - r.top) as i64).max(1);
             if area > s.area {
@@ -276,7 +286,7 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
         }
         1
     }
-    let mut s = Search { pids, best: 0, area: 0 };
+    let mut s = Search { pids, min, best: 0, area: 0 };
     unsafe { EnumWindows(visit, &mut s as *mut Search as isize) };
     if s.best == 0 {
         return false;
@@ -293,7 +303,7 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
 }
 
 #[cfg(not(windows))]
-pub fn focus_window_of(_pids: &[u32]) -> bool {
+pub fn focus_window(_pids: &[u32], _min: (i32, i32)) -> bool {
     false
 }
 
