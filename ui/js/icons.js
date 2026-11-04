@@ -1,4 +1,4 @@
-// Iconițe proprii, desenate cu linii simple (stroke = currentColor).
+// Custom icons, drawn with simple lines (stroke = currentColor).
 const svg = (body) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 

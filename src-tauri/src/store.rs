@@ -1,4 +1,4 @@
-//! Persistență simplă în fișiere JSON din folderul de date al aplicației.
+//! Simple persistence in JSON files in the application data folder.
 
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
@@ -11,7 +11,7 @@ pub fn load<T: DeserializeOwned + Default>(dir: &Path, name: &str) -> T {
         .unwrap_or_default()
 }
 
-/// Scrie atomic: întâi într-un fișier temporar, apoi îl redenumește.
+/// Writes atomically: first to a temporary file, then renames it.
 pub fn save<T: Serialize>(dir: &Path, name: &str, value: &T) {
     let tmp = dir.join(format!("{name}.tmp"));
     if let Ok(bytes) = serde_json::to_vec_pretty(value) {

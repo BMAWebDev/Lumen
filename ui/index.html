@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,12 +15,12 @@
 
   <header id="topbar">
     <nav class="tabs">
-      <button id="tab-home" class="tab active">Jocuri</button>
-      <button id="tab-library" class="tab">Bibliotecă</button>
+      <button id="tab-home" class="tab active" data-i18n="tab.games">Games</button>
+      <button id="tab-library" class="tab" data-i18n="tab.library">Library</button>
     </nav>
     <div class="status">
       <div id="running-pill" class="running-pill" hidden><i></i><span></span></div>
-      <button id="btn-settings" class="icon-btn" aria-label="Setări"></button>
+      <button id="btn-settings" class="icon-btn" aria-label="Settings" data-i18n-aria="aria.settings"></button>
       <div id="avatar" class="avatar" aria-hidden="true"></div>
       <div id="pad-batteries" class="pad-batteries"></div>
       <div id="battery" class="battery" hidden><span class="batt-icon"></span><span class="batt-pct"></span></div>
@@ -39,7 +39,7 @@
 
     <section id="library" class="view hidden">
       <div class="lib-head">
-        <h2>Biblioteca ta</h2>
+        <h2 data-i18n="lib.title">Your library</h2>
         <div id="filters" class="filters"></div>
         <span id="lib-count" class="lib-count"></span>
       </div>

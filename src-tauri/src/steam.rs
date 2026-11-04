@@ -1,4 +1,4 @@
-//! Importul jocurilor instalate prin Steam.
+//! Importing the games installed through Steam.
 
 use std::collections::HashSet;
 use std::fs;
@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::model::Game;
 use crate::{platform, util, vdf};
 
-/// Instrumente Steam care nu sunt jocuri (redistribuabile, Proton, runtime-uri).
+/// Steam tools that are not games (redistributables, Proton, runtimes).
 const EXCLUDED_IDS: &[&str] = &[
     "228980", "1070560", "1391110", "1628350", "1493710", "2180100", "2805730", "1826330",
     "961940", "1580130", "1887720", "2348590", "250820",
@@ -30,7 +30,7 @@ enum Art {
 }
 
 pub fn scan(online_art: bool) -> Result<Vec<Game>, String> {
-    let root = platform::steam_root().ok_or("Steam nu este instalat pe acest PC.")?;
+    let root = platform::steam_root().ok_or(crate::t!("Steam is not installed on this PC.", "Steam nu este instalat pe acest PC."))?;
 
     let mut libs = vec![root.clone()];
     if let Ok(text) = fs::read_to_string(root.join("steamapps").join("libraryfolders.vdf")) {
@@ -91,7 +91,7 @@ pub fn scan(online_art: bool) -> Result<Vec<Game>, String> {
     Ok(games)
 }
 
-/// Folderele cu imagini personalizate (`userdata/<cont>/config/grid`).
+/// The folders with custom images (`userdata/<account>/config/grid`).
 fn grid_dirs(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if let Ok(rd) = fs::read_dir(root.join("userdata")) {
@@ -109,8 +109,8 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Coperta, fundalul și logo-ul de pe CDN-ul Steam, pentru un joc din afara Steam
-/// care are totuși o pagină în magazin.
+/// The cover, background and logo from the Steam CDN, for a game outside Steam
+/// that still has a store page.
 pub fn cdn_art(id: u32) -> (Vec<String>, Vec<String>, Vec<String>) {
     let url = |f: &str| format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{id}/{f}");
     (
@@ -120,8 +120,8 @@ pub fn cdn_art(id: u32) -> (Vec<String>, Vec<String>, Vec<String>) {
     )
 }
 
-/// Candidații pentru o imagine: întâi cele personalizate de utilizator, apoi
-/// cache-ul local Steam (formatul nou și cel vechi), apoi CDN-ul Steam.
+/// The candidates for an image: first the user's custom ones, then the local
+/// Steam cache (new and old format), then the Steam CDN.
 fn art(id: &str, grids: &[PathBuf], cache: &Path, kind: Art, online: bool) -> Vec<String> {
     let mut v = Vec::new();
 
@@ -167,7 +167,7 @@ fn art(id: &str, grids: &[PathBuf], cache: &Path, kind: Art, online: bool) -> Ve
         v.push(format!("https://cdn.cloudflare.steamstatic.com/steam/apps/{id}/{base}.{ext}"));
     }
 
-    // Ultima variantă pentru copertă: bannerul orizontal.
+    // The last option for the cover: the horizontal banner.
     if matches!(kind, Art::Cover) {
         if dir.is_dir() {
             if let Some(p) = find_file(&dir, "header", &["jpg"], 2) {

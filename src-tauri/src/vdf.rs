@@ -1,5 +1,5 @@
-//! Parser minimal pentru formatul text KeyValues (VDF) folosit de Steam
-//! în `libraryfolders.vdf` și `appmanifest_*.acf`.
+//! Minimal parser for the KeyValues text format (VDF) used by Steam
+//! in `libraryfolders.vdf` and `appmanifest_*.acf`.
 
 #[derive(Debug, Clone)]
 pub enum Vdf {
@@ -8,7 +8,7 @@ pub enum Vdf {
 }
 
 impl Vdf {
-    /// Caută o cheie (fără diferență între majuscule și minuscule).
+    /// Looks up a key (case-insensitive).
     pub fn get(&self, key: &str) -> Option<&Vdf> {
         match self {
             Vdf::Obj(items) => items
@@ -142,7 +142,7 @@ mod tests {
 	}
 	"1"
 	{
-		"path"		"D:\\SteamLibrary" // comentariu
+		"path"		"D:\\SteamLibrary" // comment
 	}
 }"#;
         let v = parse(txt);

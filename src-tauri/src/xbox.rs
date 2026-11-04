@@ -1,9 +1,9 @@
-//! Importul jocurilor instalate prin aplicația Xbox / PC Game Pass.
+//! Importing the games installed through the Xbox app / PC Game Pass.
 //!
-//! Jocurile GDK au un fișier `MicrosoftGame.config` în folderul de instalare.
-//! Un script PowerShell enumeră pachetele MSIX (`Get-AppxPackage`), le păstrează
-//! doar pe cele care au acest fișier și extrage numele, ID-ul aplicației și
-//! imaginile declarate.
+//! GDK games have a `MicrosoftGame.config` file in the install folder.
+//! A PowerShell script enumerates the MSIX packages (`Get-AppxPackage`), keeps
+//! only those that have this file and extracts the name, the application ID and
+//! the declared images.
 
 use std::path::{Path, PathBuf};
 
@@ -69,7 +69,7 @@ fn parse(out: &str) -> Result<Vec<Game>, String> {
         return Ok(Vec::new());
     }
     let value: serde_json::Value =
-        serde_json::from_str(txt).map_err(|e| format!("Lista jocurilor Xbox nu a putut fi citită: {e}"))?;
+        serde_json::from_str(txt).map_err(|e| crate::t!(format!("The list of Xbox games could not be read: {e}"), format!("Lista jocurilor Xbox nu a putut fi citită: {e}")))?;
     let arr = match value {
         serde_json::Value::Array(a) => a,
         v @ serde_json::Value::Object(_) => vec![v],
@@ -113,8 +113,8 @@ fn parse(out: &str) -> Result<Vec<Game>, String> {
     Ok(games)
 }
 
-/// Găsește fișierul unei imagini. Dacă numele exact lipsește, caută variantele
-/// cu scală (`StoreLogo.scale-200.png`) și o alege pe cea mai mare.
+/// Finds the file of an image. If the exact name is missing, it looks for the
+/// scaled variants (`StoreLogo.scale-200.png`) and picks the largest.
 fn resolve_asset(base: &Path, rel: &str) -> Option<String> {
     let rel = rel.replace('/', "\\");
     let p = base.join(&rel);

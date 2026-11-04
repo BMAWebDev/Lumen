@@ -1,5 +1,5 @@
-// Sunetele interfeței. Implicit sunt sintetizate cu Web Audio (fără fișiere),
-// dar orice fișier din folderul temei (move, confirm, back, open, launch) le înlocuiește.
+// Interface sounds. By default they are synthesized with Web Audio (no files),
+// but any file in the theme folder (move, confirm, back, open, launch) replaces them.
 
 let ctx = null;
 let master = null;
@@ -70,17 +70,17 @@ export function play(name) {
     } else {
       synth[name]?.(c, c.currentTime + 0.001);
     }
-  } catch { /* sunetul nu e esențial */ }
+  } catch { /* the sound is not essential */ }
 }
 
-/** Încarcă un sunet personalizat (ArrayBuffer din folderul temei). */
+/** Loads a custom sound (ArrayBuffer from the theme folder). */
 export async function load(name, arrayBuffer) {
   try {
     buffers[name] = await audio().decodeAudioData(arrayBuffer);
-  } catch { /* fișier invalid: rămâne sunetul sintetizat */ }
+  } catch { /* invalid file: the synthesized sound stays */ }
 }
 
-// --- Muzică de fundal
+// --- Background music
 let music = null;
 export function setMusic(url) {
   if (!url) return;

@@ -1,6 +1,6 @@
-// Puntea dintre interfață și backend-ul Rust.
-// În afara aplicației (deschis direct în browser) folosește date simulate,
-// ca interfața să poată fi dezvoltată și testată fără Windows.
+// The bridge between the interface and the Rust backend.
+// Outside the app (opened directly in a browser) it uses mock data,
+// so the interface can be developed and tested without Windows.
 import * as mock from './mock.js';
 
 const T = window.__TAURI__;
@@ -14,7 +14,7 @@ export function on(event, cb) {
   return isTauri ? T.event.listen(event, (e) => cb(e.payload)) : mock.listen(event, cb);
 }
 
-/** Transformă o cale locală într-un URL pe care webview-ul îl poate încărca. */
+/** Turns a local path into a URL the webview can load. */
 export function fileUrl(p) {
   if (!p) return '';
   if (/^(https?:|data:|blob:)/i.test(p)) return p;
