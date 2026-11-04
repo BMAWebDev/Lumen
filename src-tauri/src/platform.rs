@@ -1,13 +1,13 @@
-//! Tot ce ține de sistemul de operare: procese, ferestre, registry, alimentare.
-//! Pe alte sisteme decât Windows funcțiile sunt înlocuite cu variante inofensive,
-//! ca proiectul să se poată compila oriunde.
+//! Everything that has to do with the operating system: processes, windows, registry, power.
+//! On systems other than Windows the functions are replaced with harmless variants,
+//! so the project can be compiled anywhere.
 
 use std::path::PathBuf;
 use std::process::Command;
 
 use crate::util;
 
-/// O comandă care nu deschide o fereastră de consolă.
+/// A command that doesn't open a console window.
 pub fn hidden(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut c = Command::new(program);
@@ -25,7 +25,7 @@ fn run(cmd: &mut Command) -> Result<(), String> {
     if status.success() {
         Ok(())
     } else {
-        Err(format!("comanda a eșuat ({status})"))
+        Err(crate::t!(format!("the command failed ({status})"), format!("comanda a eșuat ({status})")))
     }
 }
 
@@ -35,12 +35,12 @@ pub fn powershell(script: &str) -> Result<String, String> {
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
         .arg(encoded)
         .output()
-        .map_err(|e| format!("PowerShell nu a putut fi pornit: {e}"))?;
+        .map_err(|e| crate::t!(format!("PowerShell could not be started: {e}"), format!("PowerShell nu a putut fi pornit: {e}")))?;
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 // ---------------------------------------------------------------------------
-// Windows API (declarații directe, fără crate-uri suplimentare)
+// Windows API (direct declarations, no extra crates)
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
@@ -100,6 +100,9 @@ pub(crate) mod win {
         pub fn LoadLibraryW(name: *const u16) -> HANDLE;
         pub fn GetProcAddress(module: HANDLE, name: *const u8) -> *const c_void;
         pub fn GetSystemPowerStatus(status: *mut SystemPowerStatus) -> i32;
+        pub fn CreateMutexW(attrs: *const c_void, initial_owner: i32, name: *const u16) -> HANDLE;
+        pub fn OpenMutexW(access: u32, inherit: i32, name: *const u16) -> HANDLE;
+        pub fn GetLastError() -> u32;
     }
 
     #[link(name = "ntdll")]
@@ -127,7 +130,7 @@ pub(crate) mod win {
     }
 }
 
-/// Lista proceselor care rulează, cu calea completă a executabilului.
+/// The list of running processes, with the full path of the executable.
 #[cfg(windows)]
 pub fn process_paths() -> Vec<(u32, String)> {
     use win::*;
@@ -165,9 +168,9 @@ pub fn process_paths() -> Vec<(u32, String)> {
     Vec::new()
 }
 
-/// Folderul real din spatele junction-urilor. Jocurile Xbox mutate pe alt disc au
-/// `C:\Program Files\WindowsApps\…` → `D:\WindowsApps\…` → `D:\Jocuri\<joc>\Content`,
-/// iar Windows raportează procesele cu calea finală.
+/// The real folder behind junctions. Xbox games moved to another disk have
+/// `C:\Program Files\WindowsApps\…` → `D:\WindowsApps\…` → `D:\Games\<game>\Content`,
+/// and Windows reports the processes with the final path.
 fn real_dir(dir: &str) -> Option<String> {
     let p = std::fs::canonicalize(dir).ok()?.to_string_lossy().into_owned();
     let p = match p.strip_prefix(r"\\?\UNC\") {
@@ -177,7 +180,7 @@ fn real_dir(dir: &str) -> Option<String> {
     (util::norm_path(&p) != util::norm_path(dir)).then_some(p)
 }
 
-/// PID-urile proceselor pornite din folderul unui joc.
+/// The PIDs of the processes started from a game's folder.
 pub fn procs_under(dir: &str) -> Vec<u32> {
     let real = real_dir(dir);
     process_paths()
@@ -202,8 +205,8 @@ pub fn kill(pid: u32) {
 #[cfg(not(windows))]
 pub fn kill(_pid: u32) {}
 
-/// Pune în pauză (sau reia) toate firele unui proces. Un joc fără focus primește
-/// totuși input de la controler, așa că cât meniul e deschis îl înghețăm.
+/// Pauses (or resumes) all the threads of a process. A game without focus still
+/// receives controller input, so we freeze it while the menu is open.
 #[cfg(windows)]
 pub fn set_suspended(pid: u32, suspend: bool) -> bool {
     use win::*;
@@ -223,7 +226,7 @@ pub fn set_suspended(_pid: u32, _suspend: bool) -> bool {
     false
 }
 
-/// Aduce fereastra lansatorului în prim-plan, chiar dacă un joc are focusul.
+/// Brings the launcher window to the foreground, even if a game has focus.
 pub fn bring_to_front(w: &tauri::WebviewWindow) {
     let _ = w.unminimize();
     let _ = w.show();
@@ -233,8 +236,8 @@ pub fn bring_to_front(w: &tauri::WebviewWindow) {
             use win::*;
             let h = hwnd.0 as isize;
             unsafe {
-                // Windows permite SetForegroundWindow doar procesului care a primit
-                // ultimul input; o apăsare scurtă de Alt deblochează restricția.
+                // Windows only allows SetForegroundWindow for the process that received the
+                // last input; a short Alt press lifts the restriction.
                 keybd_event(0x12, 0, 0, 0);
                 keybd_event(0x12, 0, 2, 0);
                 ShowWindow(h, 9);
@@ -247,15 +250,15 @@ pub fn bring_to_front(w: &tauri::WebviewWindow) {
     let _ = w.set_fullscreen(true);
 }
 
-/// Readuce în prim-plan fereastra principală a unuia dintre procese (cea mai mare
-/// fereastră vizibilă, fără proprietar), restaurând-o dacă e minimizată.
-/// Întoarce `false` dacă procesele nu au nicio fereastră.
+/// Brings back to the foreground the main window of one of the processes (the largest
+/// visible window with no owner), restoring it if it is minimized.
+/// Returns `false` if the processes have no window.
 pub fn focus_window_of(pids: &[u32]) -> bool {
     focus_window(pids, (0, 0))
 }
 
-/// Ca `focus_window_of`, dar ignoră ferestrele mai mici decât `min` (lățime, înălțime):
-/// splash-urile și launcherele unui joc nu sunt fereastra jocului.
+/// Like `focus_window_of`, but ignores windows smaller than `min` (width, height):
+/// a game's splash screens and launchers are not the game window.
 #[cfg(windows)]
 pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
     use win::*;
@@ -266,7 +269,7 @@ pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
         area: i64,
     }
     extern "system" fn visit(hwnd: isize, lparam: isize) -> i32 {
-        // SAFETY: `lparam` e adresa lui `Search`, validă pe durata lui EnumWindows.
+        // SAFETY: `lparam` is the address of `Search`, valid for the duration of EnumWindows.
         let s = unsafe { &mut *(lparam as *mut Search) };
         let mut pid = 0;
         unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
@@ -277,7 +280,7 @@ pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
             if r.right - r.left < s.min.0 || r.bottom - r.top < s.min.1 {
                 return 1;
             }
-            // O fereastră minimizată are dreptunghiul mic, dar tot e un candidat.
+            // A minimized window has a small rectangle, but it is still a candidate.
             let area = ((r.right - r.left) as i64 * (r.bottom - r.top) as i64).max(1);
             if area > s.area {
                 s.best = hwnd;
@@ -292,7 +295,7 @@ pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
         return false;
     }
     unsafe {
-        // Ca la `bring_to_front`: o apăsare de Alt deblochează SetForegroundWindow.
+        // As in `bring_to_front`: an Alt press unlocks SetForegroundWindow.
         keybd_event(0x12, 0, 0, 0);
         keybd_event(0x12, 0, 2, 0);
         ShowWindow(s.best, if IsIconic(s.best) != 0 { 9 } else { 5 }); // SW_RESTORE / SW_SHOW
@@ -308,7 +311,7 @@ pub fn focus_window(_pids: &[u32], _min: (i32, i32)) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// Steam, URI-uri, foldere
+// Steam, URIs, folders
 // ---------------------------------------------------------------------------
 
 #[cfg(windows)]
@@ -336,17 +339,17 @@ pub fn steam_root() -> Option<PathBuf> {
         .find(|p| p.exists())
 }
 
-/// În afara Windows, se poate indica un folder Steam pentru teste: LUMEN_STEAM_ROOT.
+/// Outside Windows, a Steam folder can be given for tests: LUMEN_STEAM_ROOT.
 #[cfg(not(windows))]
 pub fn steam_root() -> Option<PathBuf> {
     std::env::var_os("LUMEN_STEAM_ROOT").map(PathBuf::from)
 }
 
-/// Pornește un executabil din folderul lui (multe jocuri își caută fișierele relativ la el).
+/// Starts an executable from its own folder (many games look for their files relative to it).
 pub fn run_exe(exe: &str, args: &[String]) -> Result<(), String> {
     let path = std::path::Path::new(exe);
     if !path.is_file() {
-        return Err("Executabilul jocului nu mai există.".into());
+        return Err(crate::t!("The game executable no longer exists.", "Executabilul jocului nu mai există.").into());
     }
     let mut cmd = Command::new(path);
     cmd.args(args);
@@ -355,7 +358,7 @@ pub fn run_exe(exe: &str, args: &[String]) -> Result<(), String> {
     }
     match cmd.spawn() {
         Ok(_) => Ok(()),
-        // 740: jocul cere drepturi de administrator; îl pornim prin UAC.
+        // 740: the game requires administrator rights; we start it through UAC.
         #[cfg(windows)]
         Err(e) if e.raw_os_error() == Some(740) => {
             let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
@@ -380,18 +383,49 @@ pub fn open_uri(uri: &str) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
-// Pornire odată cu Windows
+// Start with Windows
 // ---------------------------------------------------------------------------
+
+/// Takes a named mutex, held until the process exits. `false` if another process already holds it.
+#[cfg(windows)]
+pub fn claim_mutex(name: &str) -> bool {
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+    let name = win::wide(name);
+    let h = unsafe { win::CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+    h != 0 && unsafe { win::GetLastError() } != ERROR_ALREADY_EXISTS
+}
+
+#[cfg(windows)]
+pub fn mutex_exists(name: &str) -> bool {
+    const SYNCHRONIZE: u32 = 0x0010_0000;
+    let name = win::wide(name);
+    let h = unsafe { win::OpenMutexW(SYNCHRONIZE, 0, name.as_ptr()) };
+    if h == 0 {
+        return false;
+    }
+    unsafe { win::CloseHandle(h) };
+    true
+}
+
+#[cfg(not(windows))]
+pub fn claim_mutex(_name: &str) -> bool {
+    true
+}
+
+#[cfg(not(windows))]
+pub fn mutex_exists(_name: &str) -> bool {
+    false
+}
 
 #[cfg(windows)]
 const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
-/// Windows întârzie cu câteva secunde aplicațiile din cheia `Run`. Un task la logon
-/// pornește imediat, deci autostart-ul folosește Task Scheduler.
+/// Windows delays the applications in the `Run` key by a few seconds. A logon task
+/// starts immediately, so autostart uses Task Scheduler.
 #[cfg(windows)]
 const TASK_NAME: &str = "Lumen";
 
-/// Autostart-ul vechi, prin registry. Doar pentru migrarea către task.
+/// The old autostart, through the registry. Only for migrating to the task.
 #[cfg(windows)]
 pub fn legacy_autostart_enabled() -> bool {
     hidden("reg")
@@ -410,19 +444,19 @@ pub fn legacy_autostart_enabled() -> bool {
 pub fn set_autostart(on: bool) -> Result<(), String> {
     if on {
         if cfg!(debug_assertions) {
-            return Err("Pornirea cu Windows se activează doar din versiunea instalată.".into());
+            return Err(crate::t!("Starting with Windows can only be enabled from the installed version.", "Pornirea cu Windows se activează doar din versiunea instalată.").into());
         }
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         let q = |s: &str| s.replace('\'', "''");
         let dir = q(&exe.parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
         let exe = q(&exe.to_string_lossy());
-        // Prioritatea 4 (normală): implicit un task rulează cu 7, adică mai lent.
+        // Priority 4 (normal): by default a task runs at 7, which is slower.
         let script = format!(
             "$ErrorActionPreference = 'Stop';              $a = New-ScheduledTaskAction -Execute '{exe}' -WorkingDirectory '{dir}';              $t = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME;              $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries                   -ExecutionTimeLimit ([TimeSpan]::Zero) -Priority 4;              $p = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited;              Register-ScheduledTask -TaskName '{TASK_NAME}' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null;              'ok'"
         );
         let out = powershell(&script)?;
         if !out.contains("ok") {
-            return Err("Nu s-a putut crea task-ul de pornire.".into());
+            return Err(crate::t!("Could not create the startup task.", "Nu s-a putut crea task-ul de pornire.").into());
         }
         let _ = hidden("reg").args(["delete", RUN_KEY, "/v", "Lumen", "/f"]).status();
         Ok(())
@@ -437,11 +471,11 @@ pub fn set_autostart(on: bool) -> Result<(), String> {
 
 #[cfg(not(windows))]
 pub fn set_autostart(_on: bool) -> Result<(), String> {
-    Err("Disponibil doar pe Windows.".into())
+    Err(crate::t!("Only available on Windows.", "Disponibil doar pe Windows.").into())
 }
 
 // ---------------------------------------------------------------------------
-// Alimentare
+// Power
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, serde::Serialize)]
@@ -452,7 +486,7 @@ pub struct Battery {
     pub plugged: bool,
 }
 
-/// Starea bateriei, sau `None` pe un PC fără baterie.
+/// The battery state, or `None` on a PC without a battery.
 #[cfg(windows)]
 pub fn battery() -> Option<Battery> {
     use win::*;
@@ -460,7 +494,7 @@ pub fn battery() -> Option<Battery> {
     if unsafe { GetSystemPowerStatus(&mut st) } == 0 {
         return None;
     }
-    // 128 = fără baterie, 255 = stare necunoscută.
+    // 128 = no battery, 255 = unknown state.
     if st.battery_flag & 128 != 0 || st.battery_flag == 255 || st.battery_life_percent > 100 {
         return None;
     }
@@ -469,6 +503,24 @@ pub fn battery() -> Option<Battery> {
         charging: st.battery_flag & 8 != 0,
         plugged: st.ac_line_status == 1,
     })
+}
+
+/// Whether the Windows regional settings use a 24-hour clock (`None` if it can't be read).
+#[cfg(windows)]
+pub fn clock_24h() -> Option<bool> {
+    let out = hidden("reg")
+        .args(["query", r"HKCU\Control Panel\International", "/v", "sTimeFormat"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The format looks like `HH:mm:ss` (24-hour) or `h:mm:ss tt` (12-hour).
+    let format = text.lines().find_map(|l| l.split_once("REG_SZ").map(|(_, v)| v.trim().to_string()))?;
+    Some(format.contains('H'))
+}
+
+#[cfg(not(windows))]
+pub fn clock_24h() -> Option<bool> {
+    None
 }
 
 #[cfg(not(windows))]
@@ -485,6 +537,6 @@ pub fn power(action: &str) -> Result<(), String> {
              [System.Windows.Forms.Application]::SetSuspendState('Suspend', $false, $false) | Out-Null",
         )
         .map(|_| ()),
-        _ => Err(format!("Acțiune necunoscută: {action}")),
+        _ => Err(crate::t!(format!("Unknown action: {action}"), format!("Acțiune necunoscută: {action}"))),
     }
 }

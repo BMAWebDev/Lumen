@@ -2,9 +2,10 @@ import { call, on, fileUrl, isTauri } from './api.js';
 import * as sound from './sound.js';
 import { createInput } from './input.js';
 import { icons } from './icons.js';
+import { t, setLang, getLang, locale, translateDocument, LANGUAGES } from './i18n.js';
 
 // ======================================================================
-// Utilitare
+// Utilities
 // ======================================================================
 const $ = (s, r = document) => r.querySelector(s);
 const el = (tag, cls, html) => {
@@ -25,26 +26,19 @@ function hue(str) {
   return h;
 }
 
-// Româna cere „de” după numerele de la 20 în sus: „20 de zile”, dar „19 zile”.
-function plural(n, one, many) {
-  if (n === 1) return one;
-  const r = n % 100;
-  return `${n} ${n >= 20 && (r === 0 || r >= 20) ? 'de ' : ''}${many}`;
-}
-
 function relTime(ts) {
-  if (!ts) return 'niciodată';
+  if (!ts) return t('time.never');
   const d = Math.max(0, Date.now() / 1000 - ts);
-  if (d < 60) return 'chiar acum';
-  if (d < 3600) return `acum ${plural(Math.floor(d / 60), 'un minut', 'minute')}`;
-  if (d < 86400) return `acum ${plural(Math.floor(d / 3600), 'o oră', 'ore')}`;
-  if (d < 2 * 86400) return 'ieri';
-  if (d < 30 * 86400) return `acum ${plural(Math.floor(d / 86400), 'o zi', 'zile')}`;
-  return new Date(ts * 1000).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (d < 60) return t('time.now');
+  if (d < 3600) return t('time.minutes', { n: Math.floor(d / 60) });
+  if (d < 86400) return t('time.hours', { n: Math.floor(d / 3600) });
+  if (d < 2 * 86400) return t('time.yesterday');
+  if (d < 30 * 86400) return t('time.days', { n: Math.floor(d / 86400) });
+  return new Date(ts * 1000).toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function duration(sec) {
-  if (!sec || sec < 60) return 'sub un minut';
+  if (!sec || sec < 60) return t('duration.short');
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   if (!h) return `${m} min`;
@@ -54,12 +48,23 @@ function duration(sec) {
 function bytes(n) {
   if (!n) return '';
   const gb = n / 1024 ** 3;
-  return gb >= 1 ? `${gb.toFixed(gb >= 100 ? 0 : 1).replace('.', ',')} GB` : `${Math.round(n / 1024 ** 2)} MB`;
+  if (gb < 1) return `${Math.round(n / 1024 ** 2)} MB`;
+  const digits = gb >= 100 ? 0 : 1;
+  return `${gb.toLocaleString(locale(), { minimumFractionDigits: digits, maximumFractionDigits: digits })} GB`;
 }
 
-const SOURCE = { steam: 'Steam', xbox: 'Xbox', local: 'Local' };
+const sourceName = (src) => (src === 'local' ? t('source.local') : { steam: 'Steam', xbox: 'Xbox' }[src] || src);
+// The clock follows the Windows setting (24-hour or 12-hour); until it is known, the language's own default applies.
+let clock24 = null;
+const timeNow = () => new Date().toLocaleTimeString(locale(), {
+  hour: '2-digit', minute: '2-digit', ...(clock24 == null ? {} : { hourCycle: clock24 ? 'h23' : 'h12' }),
+});
+async function syncClockFormat() {
+  try { clock24 = await call('clock_24h'); } catch { clock24 = null; }
+  tickClock();
+}
 
-/** Încearcă pe rând fiecare imagine candidată până se încarcă una. */
+/** Tries each candidate image in turn until one loads. */
 function setSrc(img, list, onFail) {
   const urls = (list || []).map(fileUrl).filter(Boolean);
   let i = 0;
@@ -73,7 +78,7 @@ function setSrc(img, list, onFail) {
   else onFail?.();
 }
 
-/** Găsește primul URL care se încarcă (rezultatul se memorează). */
+/** Finds the first URL that loads (the result is cached). */
 const probeCache = new Map();
 function firstLoadable(list) {
   const key = (list || []).join('|');
@@ -98,7 +103,7 @@ function firstLoadable(list) {
 }
 
 // ======================================================================
-// Stare
+// State
 // ======================================================================
 const ROW_MAX = 12;
 const S = {
@@ -128,7 +133,7 @@ const S = {
   pad: 'xbox',
   booting: true,
 };
-const stack = []; // suprapuneri deschise (meniu rapid, panouri, lansare)
+const stack = []; // open overlays (quick menu, panels, launch screen)
 
 const stat = (id) => S.stats[id] || { playtimeSec: 0, lastPlayed: 0, launches: 0 };
 const gameById = (id) => S.games.find((g) => g.id === id);
@@ -136,12 +141,12 @@ const curGame = () => S.row[S.rowIndex] || null;
 
 function recentGames() {
   return [...S.games]
-    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, 'ro'))
+    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, locale()))
     .slice(0, ROW_MAX);
 }
 
 // ======================================================================
-// Fundal cu tranziție încrucișată
+// Cross-fading background
 // ======================================================================
 const layers = [...document.querySelectorAll('.bg-layer')];
 let front = 0;
@@ -161,7 +166,7 @@ function setBackground(game) {
   bgKey = key;
   const token = ++bgToken;
   clearTimeout(bgTimer);
-  // O mică întârziere: la derulare rapidă nu încărcăm fiecare fundal intermediar.
+  // A short delay: when scrolling fast we don't load every intermediate background.
   bgTimer = setTimeout(async () => {
     const src = bgSources(game);
     let mode = src.mode;
@@ -175,7 +180,7 @@ function setBackground(game) {
     back.classList.toggle('wallpaper', mode === 'wallpaper');
     if (url) {
       img.src = url;
-      try { await img.decode(); } catch { /* afișăm oricum */ }
+      try { await img.decode(); } catch { /* show it anyway */ }
     } else {
       img.removeAttribute('src');
     }
@@ -187,7 +192,7 @@ function setBackground(game) {
 }
 
 // ======================================================================
-// Ecranul principal: rândul de jocuri
+// Home screen: the row of games
 // ======================================================================
 const rowTrack = $('#row-track');
 const rowLabel = $('#row-label');
@@ -196,7 +201,7 @@ function tileArt(game) {
   const art = el('div', 'art');
   const ph = el('div', 'ph', esc(game.name));
   ph.style.setProperty('--h', hue(game.id));
-  // Jocurile locale fără copertă primesc iconița executabilului, centrată.
+  // Local games without a cover get the executable's icon, centered.
   if (game.icon) {
     const ic = el('i', 'ph-icon');
     ic.style.backgroundImage = `url("${fileUrl(game.icon).replace(/"/g, '%22')}")`;
@@ -215,18 +220,13 @@ function renderRow(keepId) {
   S.row = recentGames();
   rowTrack.textContent = '';
   S.rowEls = S.row.map((g, i) => {
-    const t = el('div', 'tile');
-    t.append(tileArt(g));
-    t.style.setProperty('--d', `${i * 40}ms`);
-    t.addEventListener('click', () => clickRow(i));
-    rowTrack.appendChild(t);
-    return t;
+    const tile = el('div', 'tile');
+    tile.append(tileArt(g));
+    tile.style.setProperty('--d', `${i * 40}ms`);
+    tile.addEventListener('click', () => clickRow(i));
+    rowTrack.appendChild(tile);
+    return tile;
   });
-  const lib = el('div', 'tile tile-library', `<div class="art">${icons.library}<span>Bibliotecă</span></div>`);
-  lib.style.setProperty('--d', `${S.row.length * 40}ms`);
-  lib.addEventListener('click', () => clickRow(S.row.length));
-  rowTrack.appendChild(lib);
-  S.rowEls.push(lib);
 
   const idx = keepId ? S.row.findIndex((g) => g.id === keepId) : -1;
   S.rowIndex = idx >= 0 ? idx : clamp(S.rowIndex, 0, S.rowEls.length - 1);
@@ -238,17 +238,18 @@ function layoutRow(instant) {
   const r = remPx;
   const small = 12 * r, big = 18 * r, gap = 1.6 * r, pad = 7 * r;
   const n = S.rowEls.length;
+  if (!n) { rowLabel.dataset.id = ''; rowLabel.textContent = ''; return; }
   const f = S.rowIndex;
   const xs = [];
   let x = 0;
   for (let i = 0; i < n; i++) { xs.push(x); x += (i === f ? big : small) + gap; }
-  // Păstrăm vizibilă o singură copertă înaintea celei selectate, ca pe consolă.
+  // Keep a single cover visible before the selected one, like on a console.
   const scroll = Math.max(0, xs[f] - (small + gap));
   if (instant) rowTrack.classList.add('instant');
-  S.rowEls.forEach((t, i) => {
+  S.rowEls.forEach((tile, i) => {
     const s = i === f ? 1 : small / big;
-    t.style.transform = `translate3d(${pad + xs[i] - scroll}px,0,0) scale(${s})`;
-    t.classList.toggle('past', i < f - 1);
+    tile.style.transform = `translate3d(${pad + xs[i] - scroll}px,0,0) scale(${s})`;
+    tile.classList.toggle('past', i < f - 1);
   });
   const g = curGame();
   rowLabel.style.transform = `translate3d(${pad + xs[f] - scroll + big + gap * 1.4}px, ${small + 1.6 * r}px, 0)`;
@@ -267,7 +268,7 @@ function onRowFocus(instant) {
   if (!instant) layoutRow(false);
   renderDetail();
   setBackground(curGame());
-  // Preîncărcăm fundalurile vecinilor, ca tranziția să fie instantanee.
+  // Preload the neighbors' backgrounds so the transition is instant.
   [S.rowIndex - 1, S.rowIndex + 1].forEach((i) => { const g = S.row[i]; if (g) firstLoadable(g.hero?.length ? g.hero : g.cover); });
   updateFocus();
 }
@@ -290,14 +291,14 @@ function clickRow(i) {
 }
 
 // ======================================================================
-// Detaliile jocului selectat
+// Details of the selected game
 // ======================================================================
 const detail = $('#detail');
 let detailId = null;
 
 function renderDetail(force) {
   const g = curGame();
-  const id = g ? g.id : S.games.length ? '__library' : '__empty';
+  const id = g ? g.id : '__empty';
   if (id === detailId && !force) return;
   const changed = id !== detailId;
   detailId = id;
@@ -327,31 +328,26 @@ function renderDetail(force) {
 
       const isRunning = S.running?.id === g.id;
       S.actions.push({
-        label: isRunning ? (S.running.started ? 'Înapoi la joc' : 'Se pornește') : 'Joacă',
+        label: isRunning ? (S.running.started ? t('game.back') : t('game.starting')) : t('game.play'),
         cls: 'primary' + (isRunning && !S.running.started ? ' muted' : ''),
         icon: isRunning && !S.running.started ? '' : icons.play,
         run: () => launch(g),
       });
-      S.actions.push({ label: '', aria: 'Mai multe opțiuni', cls: 'round', icon: icons.more, run: () => openGameOptions(g) });
+      S.actions.push({ label: '', aria: t('game.moreOptions'), cls: 'round', icon: icons.more, run: () => openGameOptions(g) });
 
       const st = stat(g.id);
       const facts = [
-        ['Platformă', `<span class="platform ${g.source}">${SOURCE[g.source] || g.source}</span>`],
-        ['Jucat ultima dată', esc(relTime(st.lastPlayed))],
+        [t('fact.platform'), `<span class="platform ${g.source}">${esc(sourceName(g.source))}</span>`],
+        [t('fact.lastPlayed'), esc(relTime(st.lastPlayed))],
       ];
-      if (st.playtimeSec) facts.push(['Timp jucat', esc(duration(st.playtimeSec))]);
-      if (g.sizeBytes) facts.push(['Spațiu ocupat', esc(bytes(g.sizeBytes))]);
+      if (st.playtimeSec) facts.push([t('fact.timePlayed'), esc(duration(st.playtimeSec))]);
+      if (g.sizeBytes) facts.push([t('fact.diskSpace'), esc(bytes(g.sizeBytes))]);
       renderActions();
-      detail.append(el('dl', 'facts', facts.map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')));
-    } else if (S.games.length) {
-      detail.append(el('h1', 'detail-title', 'Biblioteca de jocuri'));
-      detail.append(el('p', 'detail-text', `${plural(S.games.length, 'Un joc instalat', 'jocuri instalate')}, din Steam și Xbox.`));
-      S.actions.push({ label: 'Deschide biblioteca', cls: 'primary', run: () => showView('library') });
-      renderActions();
+      detail.append(el('dl', 'facts', facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')));
     } else {
-      detail.append(el('h1', 'detail-title', 'Niciun joc găsit'));
-      detail.append(el('p', 'detail-text', 'Lumen caută jocurile instalate prin Steam și prin aplicația Xbox. Instalează un joc, apoi reîmprospătează biblioteca.'));
-      S.actions.push({ label: 'Reîmprospătează biblioteca', cls: 'primary', run: () => rescan(true) });
+      detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
+      detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
+      S.actions.push({ label: t('detail.refresh'), cls: 'primary', run: () => rescan(true) });
       renderActions();
     }
     S.actionIndex = clamp(S.actionIndex, 0, S.actions.length - 1);
@@ -387,23 +383,23 @@ function renderActions() {
 }
 
 // ======================================================================
-// Biblioteca
+// Library
 // ======================================================================
-const FILTERS = [['all', 'Toate'], ['steam', 'Steam'], ['xbox', 'Xbox'], ['local', 'Locale']];
+const FILTERS = ['all', 'steam', 'xbox', 'local'];
 const grid = $('#grid');
 const filtersEl = $('#filters');
 
 function renderFilters() {
   filtersEl.textContent = '';
-  FILTERS.forEach(([key, label], i) => {
-    const b = el('button', 'chip' + (S.filter === key ? ' active' : ''), label);
+  FILTERS.forEach((key, i) => {
+    const b = el('button', 'chip' + (S.filter === key ? ' active' : ''), esc(t(`filter.${key}`)));
     b.addEventListener('click', () => { S.filterIndex = i; applyFilter(); S.zone = 'filters'; updateFocus(); });
     filtersEl.appendChild(b);
   });
 }
 
 function applyFilter() {
-  const key = FILTERS[S.filterIndex][0];
+  const key = FILTERS[S.filterIndex];
   if (S.filter === key) return;
   S.filter = key;
   sound.play('move');
@@ -415,29 +411,29 @@ function renderLibrary(keepId) {
   S.libList = S.games.filter((g) => S.filter === 'all' || g.source === S.filter);
   grid.textContent = '';
   S.libEls = S.libList.map((g, i) => {
-    const t = el('div', 'gtile');
+    const tile = el('div', 'gtile');
     const art = el('div', 'art');
     const clip = tileArt(g);
     clip.className = 'clip';
     clip.querySelector('img').loading = 'lazy';
     art.appendChild(clip);
-    t.append(art, el('div', 'name', esc(g.name)));
-    t.addEventListener('click', () => {
+    tile.append(art, el('div', 'name', esc(g.name)));
+    tile.addEventListener('click', () => {
       if (stack.length) return;
       if (S.zone === 'grid' && S.libIndex === i) { sound.play('confirm'); launch(g); return; }
       S.zone = 'grid'; S.libIndex = i; sound.play('move'); updateFocus(); scrollGrid();
     });
-    grid.appendChild(t);
-    return t;
+    grid.appendChild(tile);
+    return tile;
   });
   if (!S.libList.length) {
     const noFolders = S.filter === 'local' && !S.settings.gameFolders?.length;
-    grid.appendChild(el('div', 'empty', noFolders
-      ? 'Nu ai adăugat încă jocuri locale. Deschide Setări → Adaugă un joc, sau Setări → Foldere cu jocuri.'
-      : S.games.length ? 'Niciun joc pentru acest filtru.' : 'Biblioteca e goală. Instalează un joc din Steam sau din aplicația Xbox, apoi reîmprospătează biblioteca din meniul rapid.'));
+    grid.appendChild(el('div', 'empty', esc(t(noFolders
+      ? 'lib.emptyNoFolders'
+      : S.games.length ? 'lib.emptyFilter' : 'lib.emptyAll'))));
   }
   const n = S.libList.length;
-  $('#lib-count').textContent = n ? plural(n, 'Un joc', 'jocuri') : '';
+  $('#lib-count').textContent = n ? t('lib.count', { n }) : '';
   const idx = keepId ? S.libList.findIndex((g) => g.id === keepId) : -1;
   S.libIndex = idx >= 0 ? idx : clamp(S.libIndex, 0, Math.max(0, n - 1));
   S.gridScroll = 0;
@@ -453,11 +449,11 @@ function gridCols() {
 }
 
 function scrollGrid() {
-  const t = S.libEls[S.libIndex];
-  if (!t) return;
+  const tile = S.libEls[S.libIndex];
+  if (!tile) return;
   const wrapH = $('#grid-wrap').clientHeight;
-  const top = t.offsetTop;
-  const h = t.offsetHeight;
+  const top = tile.offsetTop;
+  const h = tile.offsetHeight;
   const margin = 3 * remPx;
   let s = S.gridScroll;
   if (top - s < margin) s = Math.max(0, top - margin);
@@ -470,7 +466,7 @@ function scrollGrid() {
 }
 
 // ======================================================================
-// Focus și vederi
+// Focus and views
 // ======================================================================
 const tabEls = () => [$('#tab-home'), $('#tab-library'), $('#btn-settings')];
 
@@ -506,7 +502,7 @@ function showView(view) {
 }
 
 // ======================================================================
-// Gestionarea acțiunilor (tastatură / controller)
+// Handling actions (keyboard / controller)
 // ======================================================================
 function homeAction(a) {
   if (S.zone === 'row') {
@@ -521,7 +517,7 @@ function homeAction(a) {
     } else if (a === 'confirm') {
       const g = curGame();
       sound.play('confirm');
-      if (g) launch(g); else if (S.games.length) showView('library'); else rescan(true);
+      if (g) launch(g); else rescan(true);
     } else if (a === 'options') {
       const g = curGame();
       if (g) { sound.play('confirm'); openGameOptions(g); }
@@ -569,7 +565,7 @@ function libraryAction(a) {
   }
 }
 
-// L2 / R2 (Home / End): salt la primul sau ultimul joc din rând ori din bibliotecă.
+// L2 / R2 (Home / End): jump to the first or last game in the row or library.
 function jumpToEnd(last) {
   if (S.view === 'home') {
     const n = S.rowEls.length;
@@ -635,10 +631,10 @@ function onAction(a) {
 }
 
 // ======================================================================
-// Suprapuneri: panouri, meniu rapid, ecran de lansare
+// Overlays: panels, quick menu, launch screen
 // ======================================================================
 const scrim = $('#scrim');
-scrim.addEventListener('click', () => { const t = stack[stack.length - 1]; if (t && t.type !== 'launch') closeTop(); });
+scrim.addEventListener('click', () => { const top = stack[stack.length - 1]; if (top && top.type !== 'launch') closeTop(); });
 
 function syncScrim() {
   scrim.classList.toggle('show', stack.some((o) => o.type !== 'launch'));
@@ -665,7 +661,7 @@ function closeAll() {
   while (stack.length && stack[stack.length - 1].type !== 'launch') closeTop(true);
 }
 
-/** Panou lateral cu o listă verticală de opțiuni. */
+/** Side panel with a vertical list of options. */
 function listPanel({ title, note, items }) {
   const panel = el('aside', 'panel');
   panel.innerHTML = `<header><h2>${esc(title)}</h2>${note ? `<p>${esc(note)}</p>` : ''}</header><ul></ul>`;
@@ -713,7 +709,7 @@ function confirmPanel(title, note, label, action) {
     title, note,
     items: [
       { label, danger: true, action: () => { closeTop(true); action(); } },
-      { label: 'Anulează', action: () => closeTop() },
+      { label: t('common.cancel'), action: () => closeTop() },
     ],
   }));
 }
@@ -724,72 +720,113 @@ function openSettings() {
     toggle: () => !!S.settings[key],
     action: () => setSetting(key, !S.settings[key]),
   });
+  const langName = LANGUAGES.find((l) => l.code === getLang())?.name || '';
   pushOverlay(listPanel({
-    title: 'Setări',
+    title: t('settings.title'),
     note: `Lumen ${S.version}`,
     items: [
-      toggle('autostart', 'Pornește odată cu Windows', 'Lumen se deschide în ecran complet după autentificare'),
-      toggle('minimizeOnLaunch', 'Minimizează când pornește un joc', 'Lumen revine singur după ce închizi jocul'),
-      toggle('pauseGame', 'Pune jocul în pauză în meniu', 'Îngheață jocul cât Lumen e deschis peste el, ca butoanele să nu ajungă în joc'),
-      toggle('sounds', 'Sunete în meniu'),
-      toggle('music', 'Muzică de fundal', S.theme.music ? '' : 'Adaugă un fișier music.mp3 în folderul temei'),
-      toggle('onlineArt', 'Imagini online pentru Steam', 'Descarcă coperțile care lipsesc din cache-ul Steam'),
-      toggle('reduceMotion', 'Reduce animațiile'),
-      { label: 'Ieșire audio', desc: 'Alege difuzoarele, căștile sau televizorul folosite de Windows', action: openAudioOutputs },
-      { label: 'Adaugă un joc', desc: 'Alege executabilul (.exe) unui joc din afara Steam și Xbox', action: addGame },
+      toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
+      toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
+      toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
+      toggle('sounds', t('settings.sounds')),
+      toggle('music', t('settings.music'), S.theme.music ? '' : t('settings.music.desc')),
+      toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
+      toggle('reduceMotion', t('settings.reduceMotion')),
+      { label: t('settings.language'), desc: langName, action: openLanguage },
+      { label: t('settings.audio'), desc: t('settings.audio.desc'), action: openAudioOutputs },
+      { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
       {
-        label: 'Foldere cu jocuri',
-        desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : 'Adaugă folderele cu jocuri din afara Steam și Xbox',
+        label: t('settings.folders'),
+        desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
         action: openGameFolders,
       },
-      { label: 'Jocuri ascunse', desc: 'Readu în bibliotecă jocurile eliminate', action: openHiddenGames },
-      { label: 'Deschide folderul temei', desc: 'Sunete, muzică, font și fundal personalizat', action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
-      { label: 'Reîmprospătează biblioteca', action: () => { closeTop(true); rescan(true); } },
+      { label: t('settings.hidden'), desc: t('settings.hidden.desc'), action: openHiddenGames },
+      { label: t('settings.theme'), desc: t('settings.theme.desc'), action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
+      { label: t('detail.refresh'), action: () => { closeTop(true); rescan(true); } },
     ],
   }));
 }
 
-// Numele, iconița și (dacă jocul e și pe Steam) coperta se completează automat la reîmprospătare.
+/** Language picker. The choice is saved by the backend, which also uses it for its own messages. */
+function openLanguage() {
+  pushOverlay(listPanel({
+    title: t('language.title'),
+    note: t('language.note'),
+    items: LANGUAGES.map((l) => ({
+      label: l.name,
+      toggle: () => getLang() === l.code,
+      action: () => setLanguage(l.code),
+    })),
+  }));
+}
+
+async function setLanguage(code) {
+  if (code === getLang()) return;
+  try {
+    S.settings = await call('set_language', { language: code });
+    setLang(S.settings.language || code);
+    closeAll();
+    refreshLanguage();
+    toast(t('language.changed'));
+    openSettings();
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+}
+
+/** Redraws everything that shows text, after the language changed. */
+function refreshLanguage() {
+  translateDocument();
+  $('#avatar').textContent = (S.user || t('user.initial')).trim().charAt(0).toUpperCase();
+  tickClock();
+  tickBattery();
+  tickPads();
+  renderFilters();
+  renderRow(curGame()?.id);
+  renderLibrary(S.libList[S.libIndex]?.id);
+  updateRunning();
+  updateHints();
+}
+
+// The name, icon and (if the game is also on Steam) cover are filled in automatically on refresh.
 async function addGame() {
   try {
     const name = await call('add_game');
     if (!name) return;
     closeAll();
-    toast(`${name} a fost adăugat. Se caută imaginile…`);
+    toast(t('add.done', { name }));
     rescan(false);
   } catch (e) {
     toast(String(e), 'error');
   }
 }
 
-// Jocurile adăugate manual se șterg de tot; celelalte doar se ascund și pot fi readuse din Setări.
+// Games added manually are deleted for good; the others are only hidden and can be brought back from Settings.
 function removeGame(g) {
   const manual = g.id.startsWith('manual:');
-  const note = manual
-    ? 'Jocul dispare doar din Lumen; fișierele lui rămân pe disc.'
-    : 'Jocul rămâne instalat. Îl poți readuce din Setări → Jocuri ascunse.';
-  confirmPanel(`Elimini ${g.name}?`, note, 'Elimină din bibliotecă', async () => {
+  const note = manual ? t('remove.noteManual') : t('remove.noteOther');
+  confirmPanel(t('remove.title', { name: g.name }), note, t('remove.confirm'), async () => {
     try {
       await call('remove_game', { id: g.id });
       closeAll();
-      // Scoatem jocul pe loc, fără o scanare completă.
+      // Remove the game right away, without a full scan.
       S.games = S.games.filter((x) => x.id !== g.id);
       renderRow();
       renderLibrary();
-      toast(`${g.name} a fost eliminat din bibliotecă.`);
+      toast(t('remove.done', { name: g.name }));
     } catch (e) {
       toast(String(e), 'error');
     }
   });
 }
 
-// Schimbă dispozitivul audio implicit al Windows, deci se aplică și jocurilor.
+// Changes the Windows default audio device, so it applies to games too.
 async function openAudioOutputs() {
   let devices = [];
   try { devices = (await call('audio_outputs')) || []; } catch (e) { toast(String(e), 'error'); return; }
   pushOverlay(listPanel({
-    title: 'Ieșire audio',
-    note: devices.length ? 'Alege unde se aude sunetul de la Windows și de la jocuri.' : 'Nu am găsit niciun dispozitiv audio.',
+    title: t('audio.title'),
+    note: devices.length ? t('audio.note') : t('audio.none'),
     items: devices.map((d) => ({
       label: d.name,
       toggle: () => d.current,
@@ -798,18 +835,18 @@ async function openAudioOutputs() {
         try {
           await call('set_audio_output', { id: d.id });
           devices.forEach((x) => { x.current = x.id === d.id; });
-          toast(`Sunetul merge acum pe ${d.name}.`);
+          toast(t('audio.done', { name: d.name }));
         } catch (e) { toast(String(e), 'error'); }
       },
     })),
   }));
 }
 
-// Steam și jocurile cu dezinstalator își cer confirmarea în propria fereastră; Xbox se dezinstalează direct.
+// Steam and games with an uninstaller ask for confirmation in their own window; Xbox games are uninstalled directly.
 function uninstallGame(g) {
   const run = async () => {
     try {
-      toast(`Se dezinstalează ${g.name}…`);
+      toast(t('uninstall.progress', { name: g.name }));
       const r = await call('uninstall_game', { id: g.id });
       closeAll();
       if (r.done) {
@@ -823,23 +860,23 @@ function uninstallGame(g) {
     }
   };
   if (g.source !== 'xbox') { run(); return; }
-  confirmPanel(`Dezinstalezi ${g.name}?`, 'Jocul și fișierele lui sunt șterse de pe disc.', 'Dezinstalează', run);
+  confirmPanel(t('uninstall.title', { name: g.name }), t('uninstall.note'), t('uninstall.confirm'), run);
 }
 
 async function openHiddenGames() {
   let hidden = [];
   try { hidden = (await call('hidden_games')) || []; } catch (e) { toast(String(e), 'error'); return; }
   pushOverlay(listPanel({
-    title: 'Jocuri ascunse',
-    note: hidden.length ? 'Alege un joc ca să-l readuci în bibliotecă.' : 'Nu ai ascuns niciun joc.',
+    title: t('hidden.title'),
+    note: hidden.length ? t('hidden.note') : t('hidden.none'),
     items: hidden.map((h) => ({
       label: h.name,
-      desc: 'Readu în bibliotecă',
+      desc: t('hidden.restore'),
       action: async () => {
         try {
           await call('restore_game', { id: h.id });
           closeAll();
-          toast(`${h.name} revine în bibliotecă.`);
+          toast(t('hidden.done', { name: h.name }));
           rescan(false);
         } catch (e) { toast(String(e), 'error'); }
       },
@@ -847,18 +884,18 @@ async function openHiddenGames() {
   }));
 }
 
-// Fiecare subfolder al unui folder de aici apare în bibliotecă ca joc „Local”.
+// Each subfolder of a folder listed here shows up in the library as a "Local" game.
 function openGameFolders() {
   const reopen = () => { closeAll(); openSettings(); openGameFolders(); };
   const folders = S.settings.gameFolders || [];
   pushOverlay(listPanel({
-    title: 'Foldere cu jocuri',
-    note: 'Fiecare subfolder e considerat un joc. Jocurile Xbox din aceste foldere sunt deja importate.',
+    title: t('folders.title'),
+    note: t('folders.note'),
     items: [
       ...folders.map((path) => ({
         label: path,
-        desc: 'Elimină folderul',
-        action: () => confirmPanel('Elimini folderul?', path, 'Elimină', async () => {
+        desc: t('folders.remove'),
+        action: () => confirmPanel(t('folders.removeTitle'), path, t('folders.removeConfirm'), async () => {
           try {
             S.settings = await call('remove_game_folder', { path });
             reopen();
@@ -867,8 +904,8 @@ function openGameFolders() {
         }),
       })),
       {
-        label: 'Adaugă folder',
-        desc: 'Se deschide fereastra Windows de alegere a folderului',
+        label: t('folders.add'),
+        desc: t('folders.add.desc'),
         action: async () => {
           try {
             const settings = await call('add_game_folder');
@@ -901,33 +938,33 @@ function applySettings() {
 function openGameOptions(g) {
   const running = S.running?.id === g.id;
   const items = [
-    ...(running && S.running.started ? [{ label: 'Înapoi la joc', action: () => resumeGame() }] : []),
+    ...(running && S.running.started ? [{ label: t('game.back'), action: () => resumeGame() }] : []),
     running
-      ? { label: 'Închide jocul', danger: true, action: () => { closeTop(true); askCloseGame(); } }
-      : { label: 'Joacă', action: () => { closeTop(true); launch(g); } },
-    { label: 'Deschide locația jocului', desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
+      ? { label: t('opt.close'), danger: true, action: () => { closeTop(true); askCloseGame(); } }
+      : { label: t('game.play'), action: () => { closeTop(true); launch(g); } },
+    { label: t('opt.openLocation'), desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
   ];
-  if (!running) items.push({ label: 'Dezinstalează', danger: true, action: () => uninstallGame(g) });
-  if (!running) items.push({ label: 'Elimină din bibliotecă', danger: true, action: () => removeGame(g) });
-  // Jocul pornit se poate închide din opțiunile oricărui joc din bibliotecă.
+  if (!running) items.push({ label: t('opt.uninstall'), danger: true, action: () => uninstallGame(g) });
+  if (!running) items.push({ label: t('remove.confirm'), danger: true, action: () => removeGame(g) });
+  // The running game can be closed from the options of any game in the library.
   const other = !running && gameById(S.running?.id);
-  if (other) items.unshift({ label: `Închide ${other.name}`, desc: 'Rulează acum', danger: true, action: () => { closeTop(true); askCloseGame(); } });
-  pushOverlay(listPanel({ title: g.name, note: `${SOURCE[g.source]} · ${relTime(stat(g.id).lastPlayed)}`, items }));
+  if (other) items.unshift({ label: t('opt.closeNamed', { name: other.name }), desc: t('opt.runningNow'), danger: true, action: () => { closeTop(true); askCloseGame(); } });
+  pushOverlay(listPanel({ title: g.name, note: `${sourceName(g.source)} · ${relTime(stat(g.id).lastPlayed)}`, items }));
 }
 
 function askCloseGame() {
   const g = gameById(S.running?.id);
   if (!g) return;
-  confirmPanel(`Închizi ${g.name}?`, 'Progresul nesalvat se va pierde.', 'Închide jocul', async () => {
+  confirmPanel(t('close.title', { name: g.name }), t('close.note'), t('opt.close'), async () => {
     try {
-      // `true`: lansarea nu fusese încă detectată, deci nu vine niciun `game-exited`.
+      // `true`: the launch hadn't been detected yet, so no `game-exited` will arrive.
       if (await call('close_game')) {
         S.running = null;
         hideLaunch();
         closeAll();
         updateRunning();
         applySettings();
-        toast(`${g.name} a fost închis.`);
+        toast(t('close.done', { name: g.name }));
       }
     } catch (e) { toast(String(e), 'error'); }
   });
@@ -935,34 +972,32 @@ function askCloseGame() {
 
 function openPower() {
   pushOverlay(listPanel({
-    title: 'Alimentare',
+    title: t('power.title'),
     items: [
-      { label: 'Intră în repaus', action: () => { closeAll(); call('power', { action: 'sleep' }); } },
-      { label: 'Repornește PC-ul', danger: true, action: () => confirmPanel('Repornești PC-ul?', 'Aplicațiile deschise se vor închide.', 'Repornește', () => call('power', { action: 'restart' })) },
-      { label: 'Oprește PC-ul', danger: true, action: () => confirmPanel('Oprești PC-ul?', 'Aplicațiile deschise se vor închide.', 'Oprește', () => call('power', { action: 'shutdown' })) },
-      { label: 'Ieși în Windows', desc: 'Închide Lumen', action: () => call('exit_app') },
+      { label: t('power.sleep'), action: () => { closeAll(); call('power', { action: 'sleep' }); } },
+      { label: t('power.restart'), danger: true, action: () => confirmPanel(t('power.restartTitle'), t('power.note'), t('power.restartConfirm'), () => call('power', { action: 'restart' })) },
+      { label: t('power.shutdown'), danger: true, action: () => confirmPanel(t('power.shutdownTitle'), t('power.note'), t('power.shutdownConfirm'), () => call('power', { action: 'shutdown' })) },
+      { label: t('power.exit'), desc: t('power.exit.desc'), action: () => call('exit_app') },
     ],
   }));
 }
 
-/** Meniul rapid: bandă orizontală jos, deschisă cu Guide / Menu / Tab. */
+/** Quick menu: a horizontal band at the bottom, opened with Guide / Menu / Tab. */
 function openQuick() {
   const running = gameById(S.running?.id);
   const cards = [
-    { label: 'Acasă', icon: icons.home, run: () => { closeAll(); showView('home'); } },
-    { label: 'Bibliotecă', icon: icons.library, run: () => { closeAll(); showView('library'); } },
+    { label: t('quick.home'), icon: icons.home, run: () => { closeAll(); showView('home'); } },
   ];
-  if (running && S.running.started) cards.unshift({ label: 'Înapoi la joc', icon: icons.play, run: () => resumeGame() });
-  if (running) cards.push({ label: `Închide ${running.name}`, icon: icons.close, danger: true, run: () => askCloseGame() });
+  if (running && S.running.started) cards.unshift({ label: t('game.back'), icon: icons.play, run: () => resumeGame() });
+  if (running) cards.push({ label: t('opt.closeNamed', { name: running.name }), icon: icons.close, danger: true, run: () => askCloseGame() });
   cards.push(
-    { label: 'Reîmprospătează biblioteca', icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
-    { label: 'Setări', icon: icons.gear, run: () => openSettings() },
-    { label: 'Alimentare', icon: icons.power, run: () => openPower() },
+    { label: t('detail.refresh'), icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
+    { label: t('settings.title'), icon: icons.gear, run: () => openSettings() },
+    { label: t('power.title'), icon: icons.power, run: () => openPower() },
   );
 
   const box = el('div', 'quick');
-  const time = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
-  box.innerHTML = `<div class="quick-top"><strong>${running ? esc(running.name) : 'Meniu rapid'}</strong><span>${running ? (S.running.started ? 'Rulează acum' : 'Se pornește') : esc(time)}</span></div><div class="quick-cards"></div>`;
+  box.innerHTML = `<div class="quick-top"><strong>${running ? esc(running.name) : esc(t('quick.title'))}</strong><span>${running ? esc(S.running.started ? t('quick.running') : t('quick.starting')) : esc(timeNow())}</span></div><div class="quick-cards"></div>`;
   const list = $('.quick-cards', box);
   let idx = 0;
   cards.forEach((c, i) => {
@@ -987,14 +1022,14 @@ function openQuick() {
   });
 }
 
-/** Așteaptă să fie eliberate butoanele controlerului (maxim 2 s). Altfel apăsarea care a ales
- *  „Înapoi la joc” rămâne apăsată și când jocul primește focusul, iar jocul o ia drept a lui. */
+/** Waits for the controller buttons to be released (2 s at most). Otherwise the press that picked
+ *  "Back to game" stays held when the game gets focus, and the game takes it as its own. */
 async function padsReleased() {
   const pressed = () => [...(navigator.getGamepads?.() || [])].some((p) => p?.buttons.some((b) => b.pressed));
   for (let i = 0; i < 40 && pressed(); i++) await new Promise((r) => setTimeout(r, 50));
 }
 
-/** Readuce jocul pornit în față; Lumen se minimizează. */
+/** Brings the running game back to the front; Lumen minimizes. */
 async function resumeGame() {
   try {
     await padsReleased();
@@ -1005,11 +1040,11 @@ async function resumeGame() {
   }
 }
 
-/** Ecranul afișat cât timp jocul pornește. */
+/** The screen shown while the game starts. */
 let launchOverlay = null;
 function showLaunch(g) {
   const box = el('div', 'launch');
-  box.innerHTML = `<div class="cover"></div><h2>${esc(g.name)}</h2><p>Se pornește…</p><div class="bar"><i></i></div>`;
+  box.innerHTML = `<div class="cover"></div><h2>${esc(g.name)}</h2><p>${esc(t('launch.starting'))}</p><div class="bar"><i></i></div>`;
   const art = tileArt(g);
   art.style.position = 'absolute';
   $('.cover', box).appendChild(art);
@@ -1041,14 +1076,14 @@ function hideLaunch() {
 }
 
 // ======================================================================
-// Lansarea jocurilor
+// Launching games
 // ======================================================================
 async function launch(g) {
   if (S.running) {
-    // „Joacă” pe jocul deja pornit te duce înapoi în el.
+    // "Play" on the game that is already running takes you back to it.
     if (S.running.id === g.id && S.running.started) resumeGame();
-    else if (S.running.id === g.id) toast(`${g.name} se pornește.`);
-    else toast(`Închide mai întâi ${gameById(S.running.id)?.name || 'jocul curent'}.`, 'error');
+    else if (S.running.id === g.id) toast(t('launch.pending', { name: g.name }));
+    else toast(t('launch.closeFirst', { name: gameById(S.running.id)?.name || t('launch.currentGame') }), 'error');
     return;
   }
   sound.play('launch');
@@ -1072,20 +1107,20 @@ function updateRunning() {
 }
 
 // ======================================================================
-// Notificări, indicii, ceas
+// Notifications, hints, clock
 // ======================================================================
 function toast(msg, kind = 'info') {
-  const t = el('div', `toast ${kind}`, esc(msg));
-  $('#toasts').appendChild(t);
-  nextFrame().then(() => t.classList.add('in'));
-  setTimeout(() => { t.classList.remove('in'); setTimeout(() => t.remove(), 420); }, 4800);
+  const node = el('div', `toast ${kind}`, esc(msg));
+  $('#toasts').appendChild(node);
+  nextFrame().then(() => node.classList.add('in'));
+  setTimeout(() => { node.classList.remove('in'); setTimeout(() => node.remove(), 420); }, 4800);
 }
 
-// Simbolurile PlayStation, desenate cu culorile lor clasice.
+// The PlayStation symbols, drawn in their classic colors.
 const psSvg = (color, body) =>
   `<svg viewBox="0 0 16 16" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
-// Meniul rapid e pe butonul din stânga (View / Create), opțiunile jocului pe cel din dreapta (☰).
-// Y / △ deschid în continuare opțiunile, dar indiciul arată butonul din dreapta.
+// The quick menu is on the left button (View / Create), game options on the right one (☰).
+// Y / △ still open the options, but the hint shows the right button.
 const GLYPHS = {
   xbox: {
     confirm: 'A', back: 'B', options: '☰',
@@ -1103,19 +1138,19 @@ function updateHints() {
   const g = GLYPHS[S.device === 'gamepad' ? S.pad : 'keyboard'];
   const top = stack[stack.length - 1];
   let list;
-  if (top?.type === 'launch') list = S.running?.started ? [['menu', 'Meniu']] : [['back', 'Anulează'], ['menu', 'Meniu']];
-  else if (top) list = [['confirm', 'Selectează'], ['back', 'Înapoi']];
-  else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'Joacă'], ['options', 'Opțiuni'], ['menu', 'Meniu']];
-  else if (S.view === 'library' && S.zone === 'grid') list = [['confirm', 'Joacă'], ['options', 'Opțiuni'], ['back', 'Înapoi'], ['menu', 'Meniu']];
-  else list = [['confirm', 'Selectează'], ['menu', 'Meniu']];
-  $('#hints').innerHTML = list.map(([k, label]) => `<span class="hint"><span class="glyph">${g[k]}</span>${label}</span>`).join('');
+  if (top?.type === 'launch') list = S.running?.started ? [['menu', 'hint.menu']] : [['back', 'hint.cancel'], ['menu', 'hint.menu']];
+  else if (top) list = [['confirm', 'hint.select'], ['back', 'hint.back']];
+  else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['menu', 'hint.menu']];
+  else if (S.view === 'library' && S.zone === 'grid') list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['back', 'hint.back'], ['menu', 'hint.menu']];
+  else list = [['confirm', 'hint.select'], ['menu', 'hint.menu']];
+  $('#hints').innerHTML = list.map(([k, label]) => `<span class="hint"><span class="glyph">${g[k]}</span>${esc(t(label))}</span>`).join('');
 }
 
 function tickClock() {
-  $('#clock').textContent = new Date().toLocaleTimeString('ro-RO', { hour: '2-digit', minute: '2-digit' });
+  $('#clock').textContent = timeNow();
 }
 
-// Bateria apare doar pe dispozitivele care au una (laptop, consolă portabilă).
+// The battery only shows on devices that have one (laptop, handheld).
 function batteryIcon(percent, charging) {
   const w = Math.round((clamp(percent, 0, 100) / 100) * 22 * 10) / 10;
   const bolt = charging ? '<path d="M15 2.5 11 9h3.5L12 15.5" fill="none" stroke="var(--void)" stroke-width="3.2" stroke-linejoin="round"/><path d="M15 2.5 11 9h3.5L12 15.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>' : '';
@@ -1128,7 +1163,7 @@ function batteryIcon(percent, charging) {
 
 async function tickBattery() {
   let b = null;
-  try { b = await call('battery'); } catch { /* fără informații despre baterie */ }
+  try { b = await call('battery'); } catch { /* no battery information */ }
   const box = $('#battery');
   box.hidden = !b;
   if (!b) return;
@@ -1137,29 +1172,29 @@ async function tickBattery() {
   box.classList.toggle('low', !charging && b.percent <= 20);
   $('.batt-icon', box).innerHTML = batteryIcon(b.percent, charging);
   $('.batt-pct', box).textContent = `${b.percent}%`;
-  box.setAttribute('aria-label', `Baterie ${b.percent}%${charging ? ', se încarcă' : ''}`);
+  box.setAttribute('aria-label', t('battery.label', { percent: b.percent, charging }));
 }
 
-// Bateria controlerelor: DualSense/DualShock prin HID, Xbox prin XInput.
+// Controller battery: DualSense/DualShock over HID, Xbox over XInput.
 async function tickPads() {
   let pads = [];
-  try { pads = (await call('pad_batteries')) || []; } catch { /* fără controlere */ }
+  try { pads = (await call('pad_batteries')) || []; } catch { /* no controllers */ }
   $('#pad-batteries').innerHTML = pads.map((p) => {
     const cls = p.charging ? ' charging' : p.percent <= 20 ? ' low' : '';
-    const name = p.kind === 'playstation' ? 'Controler PlayStation' : 'Controler Xbox';
-    return `<div class="battery pad${cls}" aria-label="${name}: ${p.percent}%${p.charging ? ', se încarcă' : ''}">
+    const name = t(p.kind === 'playstation' ? 'pad.playstation' : 'pad.xbox');
+    return `<div class="battery pad${cls}" aria-label="${esc(t('battery.padLabel', { name, percent: p.percent, charging: p.charging }))}">
       <span class="pad-icon">${icons.gamepad}</span><span class="batt-icon">${batteryIcon(p.percent, p.charging)}</span><span class="batt-pct">${p.percent}%</span>
     </div>`;
   }).join('');
 }
 
 // ======================================================================
-// Biblioteca: încărcare și reîmprospătare
+// Library: loading and refreshing
 // ======================================================================
 let manualScan = false;
 function rescan(manual) {
   manualScan = !!manual;
-  if (manual) toast('Se caută jocurile instalate…');
+  if (manual) toast(t('scan.start'));
   call('scan_library');
 }
 
@@ -1170,19 +1205,19 @@ function onLibrary({ games, warnings }) {
   probeCache.clear();
   renderRow(keepRow);
   renderLibrary(keepLib);
-  if (manualScan) toast(`Biblioteca a fost actualizată: ${plural(games.length, 'un joc', 'jocuri')}.`);
-  // Avertismentele (de ex. Steam lipsă) contează doar dacă nu s-a găsit nimic.
+  if (manualScan) toast(t('scan.done', { n: games.length }));
+  // Warnings (e.g. Steam missing) only matter if nothing was found.
   if (warnings?.length && (manualScan || !games.length)) warnings.forEach((w) => toast(w, 'error'));
   manualScan = false;
 }
 
 // ======================================================================
-// Temă personalizată
+// Custom theme
 // ======================================================================
 async function loadTheme() {
-  const t = S.theme;
+  const theme = S.theme;
   if (!isTauri) return;
-  if (t.font) {
+  if (theme.font) {
     try {
       const buf = await call('theme_file', { name: 'font' });
       const face = new FontFace('LumenTheme', buf);
@@ -1190,27 +1225,28 @@ async function loadTheme() {
       document.fonts.add(face);
       document.documentElement.style.setProperty('--font', '"LumenTheme", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif');
       measureRem();
-    } catch { /* fontul rămâne cel implicit */ }
+    } catch { /* the font stays the default one */ }
   }
   for (const name of ['move', 'confirm', 'back', 'open', 'launch']) {
-    if (t[name]) call('theme_file', { name }).then((buf) => sound.load(name, buf)).catch(() => {});
+    if (theme[name]) call('theme_file', { name }).then((buf) => sound.load(name, buf)).catch(() => {});
   }
-  if (t.music) sound.setMusic(fileUrl(t.music));
+  if (theme.music) sound.setMusic(fileUrl(theme.music));
 }
 
 // ======================================================================
-// Pornire
+// Startup
 // ======================================================================
 async function boot() {
   measureRem();
   $('#btn-settings').innerHTML = icons.gear;
-  tickClock();
+  syncClockFormat();
   setInterval(tickClock, 10_000);
+  window.addEventListener('focus', syncClockFormat);
   tickBattery();
   setInterval(tickBattery, 30_000);
   tickPads();
   setInterval(tickPads, 30_000);
-  // Controlerul abia conectat are nevoie de o clipă până răspunde prin HID.
+  // A freshly connected controller needs a moment before it answers over HID.
   for (const ev of ['gamepadconnected', 'gamepaddisconnected']) window.addEventListener(ev, () => setTimeout(tickPads, 800));
 
   const input = createInput({
@@ -1220,7 +1256,7 @@ async function boot() {
   S.device = input.device;
   S.pad = input.pad;
 
-  // Cursorul dispare după câteva secunde de inactivitate.
+  // The cursor disappears after a few seconds of inactivity.
   let cursorTimer = null;
   window.addEventListener('mousemove', () => {
     document.body.classList.remove('hide-cursor');
@@ -1234,7 +1270,7 @@ async function boot() {
   $('#tab-library').addEventListener('click', () => { if (!stack.length) { sound.play('move'); showView('library'); } });
   $('#btn-settings').addEventListener('click', () => { if (!stack.length) { sound.play('confirm'); openSettings(); } });
 
-  // Starea salvată se afișează imediat; scanarea completă vine în fundal.
+  // The saved state is shown right away; the full scan comes in the background.
   const snap = await call('get_state');
   Object.assign(S, {
     games: snap.games || [],
@@ -1246,7 +1282,12 @@ async function boot() {
     user: snap.user || '',
     version: snap.version || '',
   });
-  $('#avatar').textContent = (S.user || 'J').trim().charAt(0).toUpperCase();
+  setLang(S.settings.language);
+  translateDocument();
+  $('#avatar').textContent = (S.user || t('user.initial')).trim().charAt(0).toUpperCase();
+  tickClock();
+  tickBattery();
+  tickPads();
   await loadTheme();
   applySettings();
   renderFilters();
@@ -1257,17 +1298,17 @@ async function boot() {
   on('library', onLibrary);
   on('guide', () => {
     const top = stack[stack.length - 1];
-    // Ca pe consolă: a doua apăsare pe PS / Guide te duce înapoi în joc.
+    // Like on a console: a second press on PS / Guide takes you back to the game.
     if (top?.type === 'quick') { if (S.running?.started) resumeGame(); else closeTop(); }
     else openQuick();
   });
-  // Dongle-ul DS5 Bridge a cedat controlerul: următoarea apăsare pe PS îl conectează la PC.
-  on('pad-handoff', () => toast('Apasă PS ca să conectezi controlerul la Bluetooth-ul PC-ului.'));
+  // The DS5 Bridge dongle gave up the controller: the next PS press connects it to the PC.
+  on('pad-handoff', () => toast(t('pad.handoff')));
   on('game-started', ({ id }) => {
     S.running = { id, started: true };
     launchOverlay?.box.classList.add('started');
     const p = launchOverlay && $('p', launchOverlay.box);
-    if (p) p.textContent = 'Rulează';
+    if (p) p.textContent = t('launch.running');
     sound.musicPlay(false);
     updateRunning();
     setTimeout(hideLaunch, 1500);
@@ -1284,8 +1325,8 @@ async function boot() {
     renderRow(id);
     updateRunning();
     const g = gameById(id);
-    if (!detected) toast('Jocul nu a pornit în 3 minute, așa că timpul de joc nu a fost înregistrat.', 'error');
-    else if (g) toast(`Ai jucat ${g.name} ${duration(seconds)}.`);
+    if (!detected) toast(t('launch.notDetected'), 'error');
+    else if (g) toast(t('launch.played', { name: g.name, duration: duration(seconds) }));
     applySettings();
   });
   document.addEventListener('visibilitychange', applySettings);

@@ -26,7 +26,16 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use model::{AppState, Game, HiddenGame, Inner, Running, Settings, Stat};
 
-const THEME_README: &str = "Pune aici fișiere cu aceste nume ca să personalizezi Lumen:\r\n\
+const THEME_README_EN: &str = "Put files with these names here to customize Lumen:\r\n\
+\r\n\
+  move.wav / confirm.wav / back.wav / open.wav / launch.wav   interface sounds (wav, ogg or mp3)\r\n\
+  music.mp3                                                   looping background music (mp3, ogg, wav, m4a)\r\n\
+  font.ttf                                                    the interface font (ttf, otf, woff, woff2)\r\n\
+  wallpaper.jpg                                               default background (jpg, png, webp)\r\n\
+\r\n\
+Restart Lumen after adding or changing files.\r\n";
+
+const THEME_README_RO: &str = "Pune aici fișiere cu aceste nume ca să personalizezi Lumen:\r\n\
 \r\n\
   move.wav / confirm.wav / back.wav / open.wav / launch.wav   sunetele interfeței (wav, ogg sau mp3)\r\n\
   music.mp3                                                   muzică de fundal în buclă (mp3, ogg, wav, m4a)\r\n\
@@ -56,14 +65,32 @@ struct LibraryEvent {
 }
 
 fn lock_err<T>(_: T) -> String {
-    "Starea aplicației este blocată.".into()
+    util::state_locked().into()
+}
+
+/// The theme folder's README, in the language of the interface. It is written when missing and
+/// refreshed when the language changes, but only while it still holds one of our own texts.
+fn write_theme_readme(dir: &Path) {
+    let (want, other) = if util::is_ro() { (THEME_README_RO, THEME_README_EN) } else { (THEME_README_EN, THEME_README_RO) };
+    let path = dir.join("README.txt");
+    match fs::read_to_string(&path) {
+        Ok(text) if text != other => {}
+        _ => {
+            let _ = fs::write(&path, want);
+        }
+    }
+    // Older versions called it CITESTE.txt; drop it if the user never edited it.
+    let legacy = dir.join("CITESTE.txt");
+    if fs::read_to_string(&legacy).is_ok_and(|t| t == THEME_README_RO) {
+        let _ = fs::remove_file(&legacy);
+    }
 }
 
 fn theme_dir(data_dir: &Path) -> PathBuf {
     data_dir.join("theme")
 }
 
-/// Fișierele de temă recunoscute, după numele de bază.
+/// The recognized theme files, by base name.
 fn theme_files(dir: &Path) -> HashMap<String, String> {
     let mut m = HashMap::new();
     let Ok(rd) = fs::read_dir(dir) else { return m };
@@ -89,7 +116,7 @@ fn theme_files(dir: &Path) -> HashMap<String, String> {
 }
 
 // ---------------------------------------------------------------------------
-// Comenzi apelate din interfață
+// Commands called from the interface
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
@@ -109,7 +136,7 @@ fn get_state(state: State<'_, AppState>) -> Result<Snapshot, String> {
     })
 }
 
-/// Interfața e gata: arătăm fereastra (pornește ascunsă ca să nu clipească alb).
+/// The interface is ready: we show the window (it starts hidden so it doesn't flash white).
 #[tauri::command]
 fn app_ready(app: AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -118,7 +145,7 @@ fn app_ready(app: AppHandle) {
     };
 }
 
-/// Scanează bibliotecile în fundal și trimite evenimentul `library`.
+/// Scans the libraries in the background and sends the `library` event.
 #[tauri::command]
 fn scan_library(app: AppHandle) {
     {
@@ -148,7 +175,7 @@ fn scan_library(app: AppHandle) {
             Ok(g) => games.extend(g),
             Err(e) => warnings.push(e),
         }
-        // Jocurile adăugate manual au prioritate față de cele găsite în același folder.
+        // Manually added games take priority over the ones found in the same folder.
         let manual: Vec<Game> = store::load(&data_dir, "manual.json");
         let manual: Vec<Game> = manual.into_iter().filter(|g| Path::new(&g.launch_uri).is_file()).collect();
         let taken: Vec<String> = manual.iter().map(|g| util::norm_path(&g.install_dir)).collect();
@@ -202,19 +229,36 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
             "music" => s.settings.music = value,
             "onlineArt" => s.settings.online_art = value,
             "reduceMotion" => s.settings.reduce_motion = value,
-            _ => return Err(format!("Setare necunoscută: {key}")),
+            _ => return Err(t!(format!("Unknown setting: {key}"), format!("Setare necunoscută: {key}"))),
         }
         store::save(&s.data_dir, "settings.json", &s.settings);
         Ok(s.settings.clone())
     }
 }
 
-/// Alege un folder cu jocuri (fereastra de sistem) și îl adaugă în setări.
-/// Întoarce `None` dacă utilizatorul a renunțat.
+/// Changes the interface language (also the language of the backend's own messages) and saves it.
+#[tauri::command]
+fn set_language(app: AppHandle, state: State<'_, AppState>, language: String) -> Result<Settings, String> {
+    if !util::LANGUAGES.contains(&language.as_str()) {
+        return Err(t!(format!("Unknown language: {language}"), format!("Limbă necunoscută: {language}")));
+    }
+    util::set_lang(&language);
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    s.settings.language = language;
+    store::save(&s.data_dir, "settings.json", &s.settings);
+    write_theme_readme(&theme_dir(&s.data_dir));
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.set_title("Lumen");
+    }
+    Ok(s.settings.clone())
+}
+
+/// Picks a games folder (the system dialog) and adds it to the settings.
+/// Returns `None` if the user cancelled.
 #[tauri::command(async)]
 fn add_game_folder(app: AppHandle) -> Result<Option<Settings>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let mut dialog = app.dialog().file().set_title("Alege folderul cu jocuri");
+    let mut dialog = app.dialog().file().set_title(t!("Choose the games folder", "Alege folderul cu jocuri"));
     if let Some(w) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&w);
     }
@@ -230,12 +274,12 @@ fn add_game_folder(app: AppHandle) -> Result<Option<Settings>, String> {
     Ok(Some(s.settings.clone()))
 }
 
-/// Alege un executabil și îl adaugă în bibliotecă. Întoarce numele jocului,
-/// sau `None` dacă utilizatorul a renunțat; biblioteca se reîmprospătează separat.
+/// Picks an executable and adds it to the library. Returns the game name,
+/// or `None` if the user cancelled; the library is refreshed separately.
 #[tauri::command(async)]
 fn add_game(app: AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let mut dialog = app.dialog().file().set_title("Alege executabilul jocului").add_filter("Jocuri", &["exe"]);
+    let mut dialog = app.dialog().file().set_title(t!("Choose the game executable", "Alege executabilul jocului")).add_filter(t!("Games", "Jocuri"), &["exe"]);
     if let Some(w) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&w);
     }
@@ -247,23 +291,23 @@ fn add_game(app: AppHandle) -> Result<Option<String>, String> {
     let s = state.inner.lock().map_err(lock_err)?;
     let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
     if manual.iter().any(|g| g.id == game.id) {
-        return Err(format!("{name} e deja în bibliotecă."));
+        return Err(t!(format!("{name} is already in the library."), format!("{name} e deja în bibliotecă.")));
     }
     manual.push(game);
     store::save(&s.data_dir, "manual.json", &manual);
     Ok(Some(name))
 }
 
-/// Scoate din bibliotecă un joc adăugat manual.
+/// Removes a game from the library.
 #[tauri::command]
 fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let mut s = state.inner.lock().map_err(lock_err)?;
     if s.running.as_ref().is_some_and(|r| r.id == id) {
-        return Err("Închide jocul înainte să-l elimini.".into());
+        return Err(t!("Close the game before removing it.", "Închide jocul înainte să-l elimini.").into());
     }
-    let name = s.games.iter().find(|g| g.id == id).map(|g| g.name.clone()).ok_or("Jocul nu mai există în bibliotecă.")?;
+    let name = s.games.iter().find(|g| g.id == id).map(|g| g.name.clone()).ok_or(t!("The game is no longer in the library.", "Jocul nu mai există în bibliotecă."))?;
     if local::is_manual(&id) {
-        // Jocurile adăugate manual dispar de tot; restul doar se ascund, ca scanarea să nu le readucă.
+        // Manually added games disappear completely; the rest are only hidden, so the scan doesn't bring them back.
         let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
         manual.retain(|g| g.id != id);
         store::save(&s.data_dir, "manual.json", &manual);
@@ -279,15 +323,15 @@ fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     Ok(())
 }
 
-/// Dezinstalează un joc. Xbox rulează `Remove-AppxPackage` (câteva secunde), deci în afara firului principal.
+/// Uninstalls a game. Xbox runs `Remove-AppxPackage` (a few seconds), so it stays off the main thread.
 #[tauri::command(async)]
 fn uninstall_game(state: State<'_, AppState>, id: String) -> Result<uninstall::Outcome, String> {
     let game = {
         let s = state.inner.lock().map_err(lock_err)?;
         if s.running.as_ref().is_some_and(|r| r.id == id) {
-            return Err("Închide jocul înainte să-l dezinstalezi.".into());
+            return Err(t!("Close the game before uninstalling it.", "Închide jocul înainte să-l dezinstalezi.").into());
         }
-        s.games.iter().find(|g| g.id == id).cloned().ok_or("Jocul nu mai există în bibliotecă.")?
+        s.games.iter().find(|g| g.id == id).cloned().ok_or(t!("The game is no longer in the library.", "Jocul nu mai există în bibliotecă."))?
     };
     uninstall::run(&game)
 }
@@ -298,7 +342,7 @@ fn hidden_games(state: State<'_, AppState>) -> Result<Vec<HiddenGame>, String> {
     Ok(store::load(&s.data_dir, "hidden.json"))
 }
 
-/// Readuce în bibliotecă un joc ascuns; apare la următoarea scanare.
+/// Brings a hidden game back to the library; it shows up on the next scan.
 #[tauri::command]
 fn restore_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let s = state.inner.lock().map_err(lock_err)?;
@@ -316,17 +360,17 @@ fn remove_game_folder(state: State<'_, AppState>, path: String) -> Result<Settin
     Ok(s.settings.clone())
 }
 
-/// Deschide un folder în Explorer (locația unui joc sau folderul temei).
+/// Opens a folder in Explorer (a game's location or the theme folder).
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.is_dir() {
-        return Err("Folderul nu există.".into());
+        return Err(t!("The folder does not exist.", "Folderul nu există.").into());
     }
     platform::open_uri(&path)
 }
 
-/// Conținutul unui fișier de temă (font, sunet), ca date binare.
+/// The contents of a theme file (font, sound), as binary data.
 #[tauri::command]
 fn theme_file(state: State<'_, AppState>, name: String) -> Result<tauri::ipc::Response, String> {
     let dir = {
@@ -334,9 +378,15 @@ fn theme_file(state: State<'_, AppState>, name: String) -> Result<tauri::ipc::Re
         theme_dir(&s.data_dir)
     };
     let files = theme_files(&dir);
-    let path = files.get(&name).ok_or("Fișierul de temă nu există.")?;
+    let path = files.get(&name).ok_or(t!("The theme file does not exist.", "Fișierul de temă nu există."))?;
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
     Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// The clock format chosen in Windows, so Lumen shows the time the same way.
+#[tauri::command(async)]
+fn clock_24h() -> Option<bool> {
+    platform::clock_24h()
 }
 
 #[tauri::command]
@@ -344,13 +394,13 @@ fn battery() -> Option<platform::Battery> {
     platform::battery()
 }
 
-/// Citirea HID poate dura câteva sute de ms, deci rulează în afara firului principal.
+/// Reading HID can take a few hundred ms, so it runs off the main thread.
 #[tauri::command(async)]
 fn pad_batteries() -> Vec<pads::PadBattery> {
     pads::batteries()
 }
 
-/// Enumerarea COM + compilarea C# din PowerShell durează ~1 s, deci rulează în afara firului principal.
+/// COM enumeration + compiling C# from PowerShell takes ~1 s, so it runs off the main thread.
 #[tauri::command(async)]
 fn audio_outputs() -> Result<Vec<audio::AudioDevice>, String> {
     audio::outputs()
@@ -373,10 +423,10 @@ fn exit_app(app: AppHandle) {
     app.exit(0);
 }
 
-/// Autostart-ul făcut de versiunile vechi (cheia `Run`) devine task la logon, care pornește
-/// fără întârzierea pe care Windows o aplică aplicațiilor din `Run`.
+/// The autostart made by old versions (the `Run` key) becomes a logon task, which starts
+/// without the delay Windows applies to applications in `Run`.
 fn migrate_autostart(app: AppHandle) {
-    // Un build de dezvoltare ar înregistra propriul executabil (cu consolă), nu pe cel instalat.
+    // A development build would register its own executable (with a console), not the installed one.
     if cfg!(debug_assertions) {
         return;
     }
@@ -392,20 +442,62 @@ fn migrate_autostart(app: AppHandle) {
     });
 }
 
+/// A mutex held by Lumen while it runs; the listener uses it to stay out of the way of
+/// the Guide button, which opens the menu from inside the application.
+const APP_MUTEX: &str = r"Local\Lumen.App";
+const LISTENER_MUTEX: &str = r"Local\Lumen.Listener";
+
+/// A tiny process (no window) that stays after Lumen closes and starts the
+/// application when you hold PS + Options. While Lumen is running it does nothing.
+fn listen() {
+    if !platform::claim_mutex(LISTENER_MUTEX) {
+        return;
+    }
+    pads::watch_combo(|| {
+        if platform::mutex_exists(APP_MUTEX) {
+            return;
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            let _ = platform::hidden(&exe.to_string_lossy()).spawn();
+        }
+    });
+}
+
+/// A normally started Lumen makes sure the listener is running, so it can be restarted after exit.
+fn ensure_listener() {
+    // A development build would start the executable from `target`, not the installed one.
+    if cfg!(debug_assertions) || platform::mutex_exists(LISTENER_MUTEX) {
+        return;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = platform::hidden(&exe.to_string_lossy()).arg("--listen").spawn();
+    }
+}
+
 fn main() {
+    if std::env::args().any(|a| a == "--listen") {
+        return listen();
+    }
+    platform::claim_mutex(APP_MUTEX);
+    ensure_listener();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             fs::create_dir_all(&data_dir)?;
             let tdir = theme_dir(&data_dir);
-            if fs::create_dir_all(&tdir).is_ok() && !tdir.join("CITESTE.txt").exists() {
-                let _ = fs::write(tdir.join("CITESTE.txt"), THEME_README);
+            let mut settings: Settings = store::load(&data_dir, "settings.json");
+            if !util::LANGUAGES.contains(&settings.language.as_str()) {
+                settings.language = "en".into();
+            }
+            util::set_lang(&settings.language);
+            if fs::create_dir_all(&tdir).is_ok() {
+                write_theme_readme(&tdir);
             }
             let inner = Inner {
                 games: store::load(&data_dir, "games.json"),
                 stats: store::load(&data_dir, "stats.json"),
-                settings: store::load(&data_dir, "settings.json"),
+                settings,
                 running: None,
                 scanning: false,
                 data_dir,
@@ -424,6 +516,7 @@ fn main() {
             close_game,
             resume_game,
             set_setting,
+            set_language,
             add_game_folder,
             remove_game_folder,
             add_game,
@@ -434,6 +527,7 @@ fn main() {
             open_path,
             theme_file,
             battery,
+            clock_24h,
             pad_batteries,
             audio_outputs,
             set_audio_output,
@@ -446,9 +540,9 @@ fn main() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("Lumen nu a putut porni")
+        .expect("Lumen could not start")
         .run(|_, event| {
-            // Un joc rămas înghețat după ieșirea din Lumen n-ar mai putea fi reluat.
+            // A game left frozen after Lumen exits could never be resumed.
             if let tauri::RunEvent::Exit = event {
                 launcher::unpause();
             }

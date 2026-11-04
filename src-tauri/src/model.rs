@@ -6,19 +6,19 @@ use std::sync::Mutex;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Game {
-    /// `steam:<appid>`, `xbox:<PackageFamilyName>` sau `local:<folder>`
+    /// `steam:<appid>`, `xbox:<PackageFamilyName>` or `local:<folder>`
     pub id: String,
-    /// `steam`, `xbox` sau `local`
+    /// `steam`, `xbox` or `local`
     pub source: String,
     pub name: String,
-    /// Folderul jocului; orice proces pornit din el e considerat „jocul”.
+    /// The game folder; any process started from it counts as "the game".
     pub install_dir: String,
-    /// Un URI (Steam, Xbox) sau, pentru jocurile locale, calea executabilului.
+    /// A URI (Steam, Xbox) or, for local games, the path of the executable.
     pub launch_uri: String,
-    /// Argumentele executabilului (doar pentru jocurile locale).
+    /// The executable's arguments (local games only).
     #[serde(default)]
     pub launch_args: Vec<String>,
-    /// Candidați pentru imagini, în ordinea preferinței (căi locale sau URL-uri).
+    /// Image candidates, in order of preference (local paths or URLs).
     #[serde(default)]
     pub cover: Vec<String>,
     #[serde(default)]
@@ -27,7 +27,7 @@ pub struct Game {
     pub logo: Vec<String>,
     #[serde(default)]
     pub size_bytes: u64,
-    /// Iconița executabilului (PNG local), pentru jocurile fără copertă.
+    /// The executable's icon (local PNG), for games without a cover.
     #[serde(default)]
     pub icon: Option<String>,
 }
@@ -40,7 +40,7 @@ pub struct Stat {
     pub launches: u32,
 }
 
-/// Un joc eliminat din bibliotecă. Rămâne instalat, dar scanarea îl sare.
+/// A game removed from the library. It stays installed, but the scan skips it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HiddenGame {
@@ -52,15 +52,17 @@ pub struct HiddenGame {
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub minimize_on_launch: bool,
-    /// Îngheață jocul cât meniul Lumen e deschis peste el.
+    /// Freezes the game while the Lumen menu is open over it.
     pub pause_game: bool,
     pub sounds: bool,
     pub music: bool,
     pub online_art: bool,
     pub reduce_motion: bool,
-    /// Foldere ale căror subfoldere sunt jocuri instalate separat.
+    /// Folders whose subfolders are separately installed games.
     pub game_folders: Vec<String>,
     pub autostart: bool,
+    /// Interface language: `en` (default) or `ro`.
+    pub language: String,
 }
 
 impl Default for Settings {
@@ -74,6 +76,7 @@ impl Default for Settings {
             reduce_motion: false,
             game_folders: Vec::new(),
             autostart: false,
+            language: "en".into(),
         }
     }
 }

@@ -4,20 +4,21 @@ A console-style game launcher for Windows 11: it boots straight into full screen
 
 Built with [Tauri 2](https://tauri.app): a Rust backend and a framework-free HTML/CSS/JS interface rendered by WebView2 (included in Windows 11). The executable is a few MB, and the interface only animates `transform` and `opacity`, so it runs on the GPU and stays smooth even at 120 Hz.
 
-The interface itself is in Romanian; menu labels below are quoted as they appear in the app.
+The interface is available in English (the default) and Romanian. Switch it in **Settings → Language**; the choice is remembered.
 
 ## Features
 
 - **Home screen**: your 12 most recently played games in a horizontal row. The selected cover grows and the background fades smoothly to the game's artwork.
-- **Library**: every game in a grid, with filters for Steam, Xbox and local games. Any game can be removed from the game options; Steam, Xbox and folder games stay installed and can be brought back from **Setări → Jocuri ascunse** (Settings → Hidden games).
-- **Games outside Steam and Xbox**: in **Setări → Foldere cu jocuri** (Settings → Game folders) you add a folder (e.g. `D:\Games`) and every subfolder becomes a game. The main executable is picked automatically; League of Legends and VALORANT launch through Riot Client. You can also add a single game from **Setări → Adaugă un joc** (Settings → Add a game) by picking its executable. Local games get the executable's icon and, when the game is also on Steam, its official cover art.
+- **Library**: every game in a grid, with filters for Steam, Xbox and local games. Any game can be removed from the game options; Steam, Xbox and folder games stay installed and can be brought back from **Settings → Hidden games**.
+- **Games outside Steam and Xbox**: in **Settings → Game folders** you add a folder (e.g. `D:\Games`) and every subfolder becomes a game. The main executable is picked automatically; League of Legends and VALORANT launch through Riot Client. You can also add a single game from **Settings → Add a game** by picking its executable. Local games get the executable's icon and, when the game is also on Steam, its official cover art.
 - **Launch and return**: games start through Steam, the Xbox app or their own executable. Lumen watches the processes in the game's folder, minimizes while you play and comes back to the foreground when you quit. Playtime is saved automatically.
 - **Battery**: the header shows the PC battery (on laptops and handhelds) and the battery of connected controllers (DualSense / DualShock 4 over HID, Xbox controllers via XInput).
 - **PlayStation controllers**: DualSense and DualShock 4 are detected, and button hints switch to ✕ ○ △.
 - **Guide / PS button** opens the quick menu from anywhere, even in game. The Xbox Guide button is read through XInput, the PS button on DualSense / DualShock 4 directly over HID, so no Steam Input or DS4Windows is needed.
-- **Quick menu**: Home, Library, Close game, Refresh, Settings, Power (sleep, restart, shut down).
+- **Quick menu**: Home, Close game, Refresh, Settings, Power (sleep, restart, shut down).
 - **Start with Windows**, for a console-like experience from boot.
 - **Themes**: custom sounds, music, font and wallpaper without touching the code.
+- **Languages**: English and Romanian, switchable at runtime from Settings.
 
 ## Controls
 
@@ -70,7 +71,7 @@ Then open `http://localhost:8765`. In the browser console, `lumenGuide()` simula
 
 ## Customization
 
-Lumen creates its theme folder on first launch, at `%APPDATA%\dev.lumen.launcher\theme`. You can also open it from **Setări → Deschide folderul temei** (Settings → Open theme folder). Put files with these names there:
+Lumen creates its theme folder on first launch, at `%APPDATA%\dev.lumen.launcher\theme`. You can also open it from **Settings → Open theme folder**. Put files with these names there:
 
 | File | Purpose |
 |---|---|
@@ -98,6 +99,9 @@ Restart Lumen after making changes. Theme files stay on your computer and are no
 | `ui/js/app.js` | the interface: row, library, menus, navigation |
 | `ui/js/input.js` | keyboard, gamepad, mouse wheel |
 | `ui/js/sound.js` | sounds synthesized with Web Audio or loaded from the theme |
+| `ui/js/i18n.js` | interface translations (English, Romanian) and the `t()` helper |
+
+Messages produced by the backend (errors and system dialogs) follow the same language through the `t!` macro in `src-tauri/src/util.rs`. To add a language, add a block to `dict` and an entry to `LANGUAGES` in `ui/js/i18n.js`, and teach `util::set_lang` and `util::LANGUAGES` about it.
 
 Data (the scanned library, playtime, settings, manually added games and cached artwork) is saved as JSON in `%APPDATA%\dev.lumen.launcher\`.
 

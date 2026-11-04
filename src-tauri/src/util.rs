@@ -1,6 +1,34 @@
-//! Utilitare fără dependențe externe.
+//! Utilities with no external dependencies.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Language of the messages the backend shows to the user. English is the default.
+static ROMANIAN: AtomicBool = AtomicBool::new(false);
+
+pub const LANGUAGES: &[&str] = &["en", "ro"];
+
+/// Selects the language of backend messages; unknown codes fall back to English.
+pub fn set_lang(code: &str) {
+    ROMANIAN.store(code == "ro", Ordering::Relaxed);
+}
+
+pub fn is_ro() -> bool {
+    ROMANIAN.load(Ordering::Relaxed)
+}
+
+/// Picks the English or the Romanian text, evaluating only the chosen one:
+/// `t!("Game not found.", "Jocul nu a fost găsit.")`.
+#[macro_export]
+macro_rules! t {
+    ($en:expr, $ro:expr $(,)?) => {
+        if $crate::util::is_ro() {
+            $ro
+        } else {
+            $en
+        }
+    };
+}
 
 pub fn now() -> u64 {
     SystemTime::now()
@@ -9,8 +37,13 @@ pub fn now() -> u64 {
         .unwrap_or(0)
 }
 
-/// Normalizează o cale Windows pentru comparații: separatori `\`, litere mici,
-/// fără separator final.
+/// Shared message for a poisoned application-state mutex.
+pub fn state_locked() -> &'static str {
+    crate::t!("The application state is locked.", "Starea aplicației este blocată.")
+}
+
+/// Normalizes a Windows path for comparisons: `\` separators, lowercase,
+/// no trailing separator.
 pub fn norm_path(p: &str) -> String {
     p.replace('/', "\\")
         .to_lowercase()
@@ -18,8 +51,8 @@ pub fn norm_path(p: &str) -> String {
         .to_string()
 }
 
-/// Verifică dacă `path` se află în interiorul folderului `dir`.
-/// Refuză folderele prea scurte (de ex. `C:`), ca să nu potrivim tot discul.
+/// Checks whether `path` is inside the folder `dir`.
+/// Refuses folders that are too short (e.g. `C:`), so we don't match the whole disk.
 pub fn is_inside(path: &str, dir: &str) -> bool {
     let dir = norm_path(dir);
     if dir.len() < 4 {
@@ -43,7 +76,7 @@ pub fn base64(data: &[u8]) -> String {
     s
 }
 
-/// Codifică un script pentru `powershell -EncodedCommand` (UTF-16LE + base64).
+/// Encodes a script for `powershell -EncodedCommand` (UTF-16LE + base64).
 pub fn powershell_encode(script: &str) -> String {
     let mut bytes = Vec::with_capacity(script.len() * 2);
     for u in script.encode_utf16() {

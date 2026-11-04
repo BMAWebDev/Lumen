@@ -1,9 +1,9 @@
-//! Butonul Guide (logo-ul Xbox) de pe controller, citit global, chiar și când
-//! un joc are focusul. Echivalentul butonului PS: deschide meniul rapid.
+//! The Guide button (the Xbox logo) on the controller, read globally, even while
+//! a game has focus. The equivalent of the PS button: it opens the quick menu.
 //!
-//! XInput standard nu expune butonul Guide. Funcția nedocumentată
-//! `XInputGetStateEx` (ordinal 100 în xinput1_4.dll) îl expune ca bitul 0x0400.
-//! Butonul PS de pe DualSense / DualShock 4 îl citim separat, prin HID (`pads.rs`).
+//! Standard XInput doesn't expose the Guide button. The undocumented function
+//! `XInputGetStateEx` (ordinal 100 in xinput1_4.dll) exposes it as bit 0x0400.
+//! The PS button on DualSense / DualShock 4 is read separately, over HID (`pads.rs`).
 
 use tauri::AppHandle;
 
@@ -22,9 +22,9 @@ pub fn start(app: AppHandle) {
     });
 }
 
-/// Aduce Lumen în față și deschide meniul rapid. Un DualSense mapat și ca XInput
-/// (Steam Input, DS4Windows) apasă „de două ori”; a doua apăsare la mai puțin de
-/// 300 ms e ignorată, altfel meniul s-ar deschide și s-ar închide la loc.
+/// Brings Lumen to the front and opens the quick menu. A DualSense also mapped as XInput
+/// (Steam Input, DS4Windows) presses "twice"; a second press less than 300 ms later
+/// is ignored, otherwise the menu would open and close again.
 #[cfg(windows)]
 fn fire(app: &AppHandle) {
     use std::sync::Mutex;
@@ -80,7 +80,7 @@ fn run(app: AppHandle) {
         if module == 0 {
             continue;
         }
-        // Ordinalul 100 se transmite ca „pointer” cu valoarea 100 (MAKEINTRESOURCE).
+        // Ordinal 100 is passed as a "pointer" with the value 100 (MAKEINTRESOURCE).
         let p = unsafe { GetProcAddress(module, 100usize as *const u8) };
         if !p.is_null() {
             func = Some(unsafe { std::mem::transmute::<*const c_void, GetStateEx>(p) });
@@ -94,7 +94,7 @@ fn run(app: AppHandle) {
     let mut was_down = [false; 4];
     loop {
         for i in 0..4 {
-            // Interogarea unui slot gol e costisitoare: o facem rar.
+            // Querying an empty slot is expensive: we do it rarely.
             if !connected[i] && last_probe[i].elapsed() < Duration::from_secs(2) {
                 continue;
             }

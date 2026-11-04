@@ -1,8 +1,8 @@
-//! Imagini pentru jocurile locale: iconița executabilului (256 px) și, dacă jocul
-//! există pe Steam, coperta, fundalul și logo-ul oficial de pe CDN-ul Steam.
+//! Images for local games: the executable's icon (256 px) and, if the game
+//! exists on Steam, the official cover, background and logo from the Steam CDN.
 //!
-//! Rezultatele se memorează în `art.json`, ca o reîmprospătare a bibliotecii să nu
-//! extragă din nou iconițele și să nu întrebe Steam de fiecare dată.
+//! The results are cached in `art.json`, so refreshing the library doesn't
+//! extract the icons again or ask Steam every time.
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,7 +22,7 @@ struct Entry {
     steam_tried: bool,
 }
 
-/// Extrage iconița mare a unui executabil ca PNG și caută jocul pe Steam după nume.
+/// Extracts the large icon of an executable as PNG and looks the game up on Steam by name.
 const SCRIPT: &str = r#"
 $ErrorActionPreference = 'SilentlyContinue'
 $r = [ordered]@{ icon = $false; steam = $null; ok = $false }
@@ -39,7 +39,7 @@ public static class LumenIcon {
 }
 '@
   $large = [IntPtr]::Zero; $small = [IntPtr]::Zero
-  # Dimensiunea cerută: 256 px pentru iconița mare, 16 px pentru cea mică.
+  # Requested size: 256 px for the large icon, 16 px for the small one.
   if ([LumenIcon]::SHDefExtractIconW($exe, 0, 0, [ref]$large, [ref]$small, (16 -shl 16) -bor 256) -eq 0 -and $large -ne [IntPtr]::Zero) {
     $bmp = [System.Drawing.Icon]::FromHandle($large).ToBitmap()
     $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)
@@ -67,12 +67,12 @@ fn ps_str(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
 }
 
-/// FNV-1a, pentru nume de fișiere stabile derivate din ID-ul jocului.
+/// FNV-1a, for stable file names derived from the game ID.
 fn hash(s: &str) -> u64 {
     s.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ b as u64).wrapping_mul(0x0100_0000_01b3))
 }
 
-/// Completează imaginile jocurilor locale (din cache sau, la nevoie, de pe disc și din Steam).
+/// Fills in the images of local games (from the cache or, when needed, from disk and Steam).
 pub fn decorate(games: &mut [Game], data_dir: &Path, online: bool) {
     let mut cache: HashMap<String, Entry> = store::load(data_dir, "art.json");
     let dir = data_dir.join("art");
@@ -101,7 +101,7 @@ pub fn decorate(games: &mut [Game], data_dir: &Path, online: bool) {
                 e.icon_tried = true;
                 e.icon = (res["icon"] == true).then(|| out.to_string_lossy().into_owned());
             }
-            // Fără răspuns de la Steam (fără internet) încercăm din nou data viitoare.
+            // No answer from Steam (no internet): we try again next time.
             if need_steam && res["ok"] == true {
                 e.steam_tried = true;
                 e.steam = res["steam"].as_u64().map(|id| id as u32);
@@ -121,8 +121,8 @@ pub fn decorate(games: &mut [Game], data_dir: &Path, online: bool) {
     }
 }
 
-/// Numele jocului din metadatele executabilului (ProductName / FileDescription),
-/// ignorând valorile generice ale motoarelor și launcherelor.
+/// The game name from the executable's metadata (ProductName / FileDescription),
+/// ignoring the generic values of engines and launchers.
 pub fn exe_title(exe: &Path) -> Option<String> {
     let script = format!(
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; \

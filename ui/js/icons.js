@@ -1,4 +1,4 @@
-// Iconițe proprii, desenate cu linii simple (stroke = currentColor).
+// Custom icons, drawn with simple lines (stroke = currentColor).
 const svg = (body) =>
   `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 
@@ -7,7 +7,7 @@ export const icons = {
   library: svg('<rect x="4" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.4"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.4"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.4"/>'),
   close: svg('<circle cx="12" cy="12" r="8"/><path d="m9.2 9.2 5.6 5.6M14.8 9.2l-5.6 5.6"/>'),
   refresh: svg('<path d="M19 12a7 7 0 1 1-2.05-4.95"/><path d="M19 5v4h-4"/>'),
-  gear: svg('<circle cx="12" cy="12" r="2.8"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M18 6l-1.6 1.6M7.6 16.4 6 18M18 18l-1.6-1.6M7.6 7.6 6 6"/>'),
+  gear: svg('<path d="M10.54 4.95 L10.92 2.86 L13.08 2.86 L13.46 4.95 L15.95 5.98 L17.70 4.78 L19.22 6.30 L18.02 8.05 L19.05 10.54 L21.14 10.92 L21.14 13.08 L19.05 13.46 L18.02 15.95 L19.22 17.70 L17.70 19.22 L15.95 18.02 L13.46 19.05 L13.08 21.14 L10.92 21.14 L10.54 19.05 L8.05 18.02 L6.30 19.22 L4.78 17.70 L5.98 15.95 L4.95 13.46 L2.86 13.08 L2.86 10.92 L4.95 10.54 L5.98 8.05 L4.78 6.30 L6.30 4.78 L8.05 5.98Z"/><circle cx="12" cy="12" r="3"/>'),
   power: svg('<path d="M12 4v7"/><path d="M7.1 7.2a7 7 0 1 0 9.8 0"/>'),
   more: svg('<circle cx="6" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="18" cy="12" r="1.2" fill="currentColor"/>'),
   folder: svg('<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),

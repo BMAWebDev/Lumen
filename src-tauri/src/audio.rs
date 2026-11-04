@@ -1,9 +1,9 @@
-//! Dispozitivele de ieșire audio ale Windows și schimbarea celui implicit.
+//! The Windows audio output devices and changing the default one.
 //!
-//! Windows nu oferă un API public pentru schimbarea dispozitivului implicit; singura
-//! cale (folosită și de Setări, și de utilitarele terțe) e interfața COM nedocumentată
-//! `IPolicyConfig`. O apelăm dintr-un script PowerShell cu C# compilat din mers, ca să
-//! nu adăugăm crate-uri sau declarații COM în proiect.
+//! Windows has no public API for changing the default device; the only way (used by
+//! Settings and by third-party utilities alike) is the undocumented COM interface
+//! `IPolicyConfig`. We call it from a PowerShell script with C# compiled on the fly, so
+//! we don't add crates or COM declarations to the project.
 
 use serde::Serialize;
 
@@ -78,7 +78,7 @@ public static class Audio {
     return s;
   }
 
-  // Un dispozitiv pe linie: id <TAB> nume <TAB> 1 dacă e cel implicit.
+  // One device per line: id <TAB> name <TAB> 1 if it is the default.
   public static string List() {
     var en = (IMMDeviceEnumerator)new MMDeviceEnumeratorCom();
     string cur = "";
@@ -96,7 +96,7 @@ public static class Audio {
     return sb.ToString();
   }
 
-  // Console, Multimedia și Communications, ca să se schimbe tot sistemul.
+  // Console, Multimedia and Communications, so the whole system changes.
   public static int Set(string id) {
     var pc = (IPolicyConfig)new PolicyConfigClient();
     for (int role = 0; role < 3; role++) {
@@ -113,12 +113,12 @@ fn script(body: &str) -> String {
     format!("$ErrorActionPreference='Stop'\nAdd-Type -TypeDefinition @'\n{CSHARP}\n'@\n{body}")
 }
 
-/// Dispozitivele de redare active, cu cel implicit marcat.
+/// The active playback devices, with the default one marked.
 #[cfg(windows)]
 pub fn outputs() -> Result<Vec<AudioDevice>, String> {
     let out = crate::platform::powershell(&script("try { [Console]::Out.Write([Audio]::List()) } catch { [Console]::Out.Write('ERR:' + $_) }"))?;
     if let Some(e) = out.trim().strip_prefix("ERR:") {
-        return Err(format!("Nu am putut citi dispozitivele audio: {e}"));
+        return Err(crate::t!(format!("Could not read the audio devices: {e}"), format!("Nu am putut citi dispozitivele audio: {e}")));
     }
     Ok(out
         .lines()
@@ -130,12 +130,12 @@ pub fn outputs() -> Result<Vec<AudioDevice>, String> {
         .collect())
 }
 
-/// Face din `id` dispozitivul implicit de redare pentru tot sistemul.
+/// Makes `id` the default playback device for the whole system.
 #[cfg(windows)]
 pub fn set_output(id: &str) -> Result<(), String> {
-    // Id-ul ajunge într-un script, deci acceptăm doar forma `{0.0.0.00000000}.{guid}`.
+    // The id ends up in a script, so we only accept the `{0.0.0.00000000}.{guid}` form.
     if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '{' | '}' | '.' | '-')) {
-        return Err("Dispozitiv audio nevalid.".into());
+        return Err(crate::t!("Invalid audio device.", "Dispozitiv audio nevalid.").into());
     }
     let body = format!(
         "try {{ $r = [Audio]::Set('{id}'); if ($r -eq 0) {{ [Console]::Out.Write('OK') }} else {{ [Console]::Out.Write('ERR:0x{{0:X8}}' -f $r) }} }} catch {{ [Console]::Out.Write('ERR:' + $_) }}"
@@ -143,7 +143,10 @@ pub fn set_output(id: &str) -> Result<(), String> {
     let out = crate::platform::powershell(&script(&body))?;
     match out.trim() {
         "OK" => Ok(()),
-        e => Err(format!("Nu am putut schimba ieșirea audio: {}", e.trim_start_matches("ERR:"))),
+        e => {
+            let e = e.trim_start_matches("ERR:");
+            Err(crate::t!(format!("Could not change the audio output: {e}"), format!("Nu am putut schimba ieșirea audio: {e}")))
+        }
     }
 }
 
@@ -154,5 +157,5 @@ pub fn outputs() -> Result<Vec<AudioDevice>, String> {
 
 #[cfg(not(windows))]
 pub fn set_output(_id: &str) -> Result<(), String> {
-    Err("Disponibil doar pe Windows.".into())
+    Err(crate::t!("Only available on Windows.", "Disponibil doar pe Windows.").into())
 }

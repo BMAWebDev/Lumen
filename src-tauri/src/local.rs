@@ -1,8 +1,8 @@
-//! Jocuri instalate separat, în afara Steam și Xbox (de ex. `D:\Jocuri`).
+//! Games installed separately, outside Steam and Xbox (e.g. `D:\Games`).
 //!
-//! Fiecare subfolder al unui folder ales în Setări e considerat un joc. Alegem
-//! executabilul principal după nume (seamănă cu numele folderului) și mărime,
-//! ignorând dezinstalatoarele, redistribuabilele și utilitarele de raportare.
+//! Each subfolder of a folder chosen in Settings counts as a game. We pick the main
+//! executable by name (it resembles the folder name) and size, ignoring
+//! uninstallers, redistributables and crash-reporting tools.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -10,20 +10,20 @@ use std::path::{Path, PathBuf};
 use crate::model::Game;
 use crate::util;
 
-/// Fragmente de nume care indică un executabil auxiliar, nu jocul.
+/// Name fragments that indicate a helper executable, not the game.
 const SKIP_EXE: &[&str] = &[
     "unins", "uninstall", "setup", "install", "redist", "dxsetup", "crash", "report", "helper",
     "update", "patch", "prereq", "dotnet", "easyanticheat", "eac_", "battleye", "be_service",
     "cefprocess", "webhelper", "touchup", "cleanup", "config", "settings", "dxwebsetup",
 ];
 
-/// Subfoldere care conțin doar instalatoare sau dependențe.
+/// Subfolders that only contain installers or dependencies.
 const SKIP_DIR: &[&str] = &[
     "_uninstall", "redist", "_redist", "vcredist", "directx", "installerresources", "__installer",
     "_commonredist", "commonredist", "prerequisites", "support", "dotnet", "easyanticheat", "battleye",
 ];
 
-/// Produsele Riot pornesc prin Riot Client, nu direct din executabil.
+/// Riot products launch through Riot Client, not directly from the executable.
 const RIOT: &[(&str, &str, &str)] = &[
     ("League of Legends", "league_of_legends", "League of Legends"),
     ("VALORANT", "valorant", "VALORANT"),
@@ -39,7 +39,7 @@ pub fn scan(folders: &[String]) -> Vec<Game> {
             if !dir.is_dir() {
                 continue;
             }
-            // Jocurile Xbox instalate aici le importă deja `xbox.rs`.
+            // Xbox games installed here are already imported by `xbox.rs`.
             if has_file(&dir, "MicrosoftGame.config", 2) {
                 continue;
             }
@@ -83,14 +83,14 @@ fn riot(dir: &Path) -> Option<Vec<Game>> {
         .filter(|(sub, _, _)| dir.join(sub).is_dir())
         .map(|(sub, product, name)| {
             let args = vec![format!("--launch-product={product}"), "--launch-patchline=live".into()];
-            // Urmărim doar folderul produsului, ca Riot Client rămas deschis să nu conteze ca „jocul”.
+            // We only watch the product folder, so a Riot Client left open doesn't count as "the game".
             game(&dir.join(sub), name, &client, args)
         })
         .collect();
     Some(games)
 }
 
-/// Litere și cifre, cu litere mici: „Split Fiction” → „splitfiction”.
+/// Letters and digits, lowercase: "Split Fiction" → "splitfiction".
 fn simplify(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
@@ -106,7 +106,7 @@ fn pick_exe(dir: &Path, name: &str) -> Option<PathBuf> {
         })
         .max_by_key(|(p, size)| {
             let stem = simplify(&p.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default());
-            // Un nume care seamănă cu folderul bate mărimea: „SplitFiction.exe” în „Split Fiction”.
+            // A name that resembles the folder beats size: "SplitFiction.exe" in "Split Fiction".
             let similar = stem.len() >= 3 && (folder.contains(&stem) || stem.contains(&folder));
             (similar, *size)
         })
@@ -151,10 +151,10 @@ fn dir_size(dir: &Path) -> u64 {
 }
 
 // ---------------------------------------------------------------------------
-// Jocuri adăugate manual (un .exe ales din interfață)
+// Manually added games (an .exe chosen from the interface)
 // ---------------------------------------------------------------------------
 
-/// Foldere intermediare care nu spun nimic despre numele jocului.
+/// Intermediate folders that say nothing about the game's name.
 const GENERIC_DIRS: &[&str] = &[
     "bin", "bin64", "binaries", "win64", "win32", "x64", "x86", "game", "content", "retail", "shipping", "live",
 ];
@@ -163,14 +163,14 @@ pub fn is_manual(id: &str) -> bool {
     id.starts_with("manual:")
 }
 
-/// Creează un joc dintr-un executabil ales de utilizator. Numele vine din
-/// metadatele executabilului, iar dacă lipsesc, din folderul jocului.
+/// Creates a game from an executable chosen by the user. The name comes from the
+/// executable's metadata and, if missing, from the game folder.
 pub fn manual_game(exe: &Path) -> Result<Game, String> {
     if !exe.is_file() {
-        return Err("Fișierul ales nu există.".into());
+        return Err(crate::t!("The chosen file does not exist.", "Fișierul ales nu există.").into());
     }
-    // Folderul jocului: urcăm peste `Binaries\Win64` și altele asemenea.
-    let mut dir = exe.parent().ok_or("Executabil fără folder.")?;
+    // The game folder: we go up past `Binaries\Win64` and the like.
+    let mut dir = exe.parent().ok_or(crate::t!("Executable without a folder.", "Executabil fără folder."))?;
     while let Some(parent) = dir.parent() {
         let n = dir.file_name().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
         if !GENERIC_DIRS.contains(&n.as_str()) || parent.parent().is_none() {
@@ -178,7 +178,7 @@ pub fn manual_game(exe: &Path) -> Result<Game, String> {
         }
         dir = parent;
     }
-    // Unreal Engine: `<Joc>\<Proiect>\Binaries\Win64`, cu `<Joc>\Engine` alături de proiect.
+    // Unreal Engine: `<Game>\<Project>\Binaries\Win64`, with `<Game>\Engine` next to the project.
     if let Some(parent) = dir.parent().filter(|p| p.join("Engine").is_dir() && p.parent().is_some()) {
         dir = parent;
     }
@@ -201,8 +201,8 @@ pub fn manual_game(exe: &Path) -> Result<Game, String> {
     })
 }
 
-/// Executabilul din care luăm iconița: cel lansat, sau, când jocul pornește printr-un
-/// launcher din alt folder (Riot Client), cel mai probabil executabil din folderul jocului.
+/// The executable we take the icon from: the launched one or, when the game starts through a
+/// launcher in another folder (Riot Client), the most likely executable in the game folder.
 pub fn icon_source(g: &Game) -> Option<PathBuf> {
     let exe = PathBuf::from(&g.launch_uri);
     if util::is_inside(&g.launch_uri, &g.install_dir) {

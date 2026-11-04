@@ -1,5 +1,5 @@
-// Date simulate pentru dezvoltarea interfeței în browser (fără backend).
-// Jocurile și imaginile sunt inventate și generate ca SVG.
+// Mock data for developing the interface in a browser (no backend).
+// The games and images are made up and generated as SVG.
 
 const listeners = {};
 export function listen(event, cb) {
@@ -16,14 +16,14 @@ const uri = (svg) => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(sv
 function shapes(v, h1, h2, w, hgt) {
   const k = w / 600;
   switch (v % 4) {
-    case 0: // creste de munți
+    case 0: // mountain ridges
       return `<path d="M0 ${hgt * 0.72} L${w * 0.22} ${hgt * 0.42} L${w * 0.4} ${hgt * 0.6} L${w * 0.62} ${hgt * 0.3} L${w} ${hgt * 0.68} V${hgt} H0Z" fill="hsl(${h2} 60% 10%)" opacity=".85"/>
               <path d="M0 ${hgt * 0.82} L${w * 0.3} ${hgt * 0.62} L${w * 0.55} ${hgt * 0.78} L${w * 0.8} ${hgt * 0.58} L${w} ${hgt * 0.74} V${hgt} H0Z" fill="hsl(${h2} 70% 6%)"/>`;
-    case 1: // inele
+    case 1: // rings
       return [1, 2, 3, 4].map((i) => `<circle cx="${w * 0.66}" cy="${hgt * 0.4}" r="${70 * i * k}" stroke="hsl(${h1} 90% 80%)" stroke-opacity="${0.5 - i * 0.1}" stroke-width="${6 * k}" fill="none"/>`).join('');
-    case 2: // dungi diagonale
+    case 2: // diagonal stripes
       return [0, 1, 2, 3, 4, 5].map((i) => `<rect x="${(i * 130 - 200) * k}" y="${-100 * k}" width="${46 * k}" height="${hgt * 1.6}" fill="hsl(${h1} 85% 70%)" opacity="${0.08 + i * 0.03}" transform="rotate(28 ${w / 2} ${hgt / 2})"/>`).join('');
-    default: // soare la orizont
+    default: // sun on the horizon
       return `<circle cx="${w * 0.5}" cy="${hgt * 0.62}" r="${150 * k}" fill="hsl(${h1} 95% 70%)" opacity=".9"/>
               <rect y="${hgt * 0.62}" width="${w}" height="${hgt * 0.38}" fill="hsl(${h2} 70% 8%)"/>
               ${[0, 1, 2, 3].map((i) => `<rect x="0" y="${hgt * (0.66 + i * 0.07)}" width="${w}" height="${3 * k}" fill="hsl(${h1} 90% 70%)" opacity="${0.5 - i * 0.1}"/>`).join('')}`;
@@ -100,17 +100,17 @@ const stats = {};
 DATA.forEach(([, , , , , ago, play], i) => {
   if (ago) stats[games[i].id] = { playtimeSec: play, lastPlayed: now - ago, launches: 3 + i };
 });
-const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, gameFolders: [] };
+const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, language: 'en', gameFolders: [] };
 let running = null;
 let audioOut = 'a';
-const AUDIO = [['a', 'Difuzoare (Realtek Audio)'], ['b', 'Căști (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
+const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
 let hidden = [];
 const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
 export async function invoke(cmd, args) {
   switch (cmd) {
     case 'get_state':
-      return { games: visible(), stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\tu\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
+      return { games: visible(), stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\you\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
     case 'scan_library':
       setTimeout(() => emit('library', { games: visible(), warnings: [] }), 700);
       return;
@@ -123,28 +123,31 @@ export async function invoke(cmd, args) {
       if (running && !running.started) running = null;
       return;
     case 'resume_game':
-      if (!running?.started) throw new Error('Niciun joc nu rulează.');
+      if (!running?.started) throw new Error('No game is running.');
       return;
     case 'close_game':
       if (!running) return false;
-      // Lansare încă nedetectată: interfața își curăță singură starea.
+      // Launch not detected yet: the interface clears its own state.
       if (!running.started) { running = null; return true; }
       { const id = running.id; running = null; setTimeout(() => emit('game-exited', { id, seconds: 1260, detected: true }), 400); }
       return false;
+    case 'set_language':
+      settings.language = args.language;
+      return { ...settings };
     case 'set_setting':
       settings[args.key] = args.value;
       return { ...settings };
     case 'add_game_folder':
-      if (!settings.gameFolders.includes('D:\\Jocuri')) settings.gameFolders.push('D:\\Jocuri');
+      if (!settings.gameFolders.includes('D:\\Games')) settings.gameFolders.push('D:\\Games');
       return { ...settings, gameFolders: [...settings.gameFolders] };
     case 'remove_game_folder':
       settings.gameFolders = settings.gameFolders.filter((f) => f !== args.path);
       return { ...settings, gameFolders: [...settings.gameFolders] };
     case 'add_game': {
-      // Un joc adăugat manual, fără copertă, doar cu iconița executabilului.
-      if (games.some((g) => g.id === 'manual:lantern')) throw new Error('Paper Lantern e deja în bibliotecă.');
+      // A manually added game, without a cover, only with the executable's icon.
+      if (games.some((g) => g.id === 'manual:lantern')) throw new Error('Paper Lantern is already in the library.');
       games.push({
-        id: 'manual:lantern', source: 'local', name: 'Paper Lantern', installDir: 'D:\\Jocuri\\Paper Lantern',
+        id: 'manual:lantern', source: 'local', name: 'Paper Lantern', installDir: 'D:\\Games\\Paper Lantern',
         launchUri: '', launchArgs: [], cover: [], hero: [], logo: [], sizeBytes: 3.2e9,
         icon: uri('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="8" y="8" width="48" height="48" rx="12" fill="#f5b84a"/><path d="M32 16c8 8 10 16 0 32-10-16-8-24 0-32z" fill="#7a3a00"/></svg>'),
       });
@@ -159,11 +162,11 @@ export async function invoke(cmd, args) {
     }
     case 'uninstall_game': {
       const g = games.find((x) => x.id === args.id);
-      if (!g) throw new Error('Jocul nu mai există în bibliotecă.');
-      if (g.source === 'local') throw new Error('Jocul nu are dezinstalator. Deschide locația jocului și șterge folderul manual.');
-      if (g.source === 'steam') return { done: false, message: 'Confirmă dezinstalarea în fereastra Steam, apoi reîmprospătează biblioteca.' };
+      if (!g) throw new Error('The game is no longer in the library.');
+      if (g.source === 'local') throw new Error('The game has no uninstaller. Open the game location and delete the folder manually.');
+      if (g.source === 'steam') return { done: false, message: 'Confirm the uninstall in the Steam window, then refresh the library.' };
       games.splice(games.indexOf(g), 1);
-      return { done: true, message: `${g.name} a fost dezinstalat.` };
+      return { done: true, message: `${g.name} was uninstalled.` };
     }
     case 'hidden_games':
       return [...hidden];
@@ -176,7 +179,9 @@ export async function invoke(cmd, args) {
       audioOut = args.id;
       return;
     case 'theme_file':
-      throw new Error('fără temă');
+      throw new Error('no theme');
+    case 'clock_24h':
+      return true;
     case 'battery':
       return { percent: 64, charging: false, plugged: false };
     case 'pad_batteries':
@@ -186,5 +191,5 @@ export async function invoke(cmd, args) {
   }
 }
 
-// Permite simularea butonului Guide din consolă: lumenGuide()
+// Lets you simulate the Guide button from the console: lumenGuide()
 window.lumenGuide = () => emit('guide', null);

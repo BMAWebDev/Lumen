@@ -1,5 +1,5 @@
-/* Lumen — interfață în stil consolă.
-   Regula de performanță: animăm doar transform și opacity (compuse pe GPU). */
+/* Lumen — console-style interface.
+   Performance rule: we only animate transform and opacity (composited on the GPU). */
 
 :root {
   --void: #03050c;
@@ -14,7 +14,7 @@
   --t: 280ms;
   --pad: 7rem;
   --font: "Segoe UI Variable Display", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  /* 1rem = 10px la 1080p; totul se scalează cu rezoluția (inclusiv 1440p, 4K) */
+  /* 1rem = 10px at 1080p; everything scales with the resolution (including 1440p, 4K) */
   font-size: calc(100vh / 108);
 }
 @media (max-aspect-ratio: 4/3) {
@@ -38,7 +38,7 @@ body.reduce-motion *, body.reduce-motion *::after { animation-duration: 1ms !imp
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
 img { -webkit-user-drag: none; }
 
-/* ------------------------------------------------------------------ Fundal */
+/* ------------------------------------------------------------------ Background */
 #bg {
   position: fixed; inset: 0; z-index: 0; overflow: hidden;
   background: radial-gradient(120% 90% at 72% 0%, #14264f 0%, #070e21 46%, var(--void) 82%);
@@ -82,7 +82,7 @@ img { -webkit-user-drag: none; }
 }
 body[data-view="library"] #bg::after { opacity: 0.72; }
 
-/* ---------------------------------------------------------------- Bara sus */
+/* ---------------------------------------------------------------- Top bar */
 #topbar {
   position: fixed; top: 0; left: 0; right: 0; height: 9rem; z-index: 5;
   display: flex; align-items: center; justify-content: space-between;
@@ -127,7 +127,7 @@ body[data-view="library"] #bg::after { opacity: 0.72; }
 .running-pill span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .running-pill i { width: 0.9rem; height: 0.9rem; border-radius: 50%; background: #4ade80; flex: none; }
 
-/* Focus pe elementele din bara de sus */
+/* Focus on the top bar items */
 .tab::after, .icon-btn::after {
   content: ""; position: absolute; inset: -0.2rem; border-radius: inherit;
   border: 0.3rem solid #fff; opacity: 0; transition: opacity 160ms;
@@ -135,7 +135,7 @@ body[data-view="library"] #bg::after { opacity: 0.72; }
 .icon-btn { position: relative; }
 body[data-zone="tabs"] .focused::after { opacity: 1; }
 
-/* -------------------------------------------------------------- Vederi */
+/* -------------------------------------------------------------- Views */
 main { position: fixed; inset: 0; z-index: 2; }
 .view {
   position: absolute; inset: 0;
@@ -143,7 +143,7 @@ main { position: fixed; inset: 0; z-index: 2; }
 }
 .view.hidden { opacity: 0; transform: scale(0.985); pointer-events: none; }
 
-/* ------------------------------------------------------- Rândul de jocuri */
+/* ------------------------------------------------------- Row of games */
 .row { position: absolute; top: 11rem; left: 0; right: 0; height: 22rem; }
 .row-track { position: absolute; inset: 0; }
 .row-track.instant .tile { transition: none; }
@@ -184,12 +184,6 @@ main { position: fixed; inset: 0; z-index: 2; }
   pointer-events: none;
 }
 body[data-zone="row"] .tile.focused::after { opacity: 1; }
-.tile-library .art {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6rem;
-  background: rgba(255, 255, 255, 0.1);
-  font-size: 2.6rem; font-weight: 400;
-}
-.tile-library svg { width: 6rem; height: 6rem; }
 .row-label {
   position: absolute; left: 0; top: 0; max-width: 60rem;
   font-size: 2.3rem; font-weight: 400; color: var(--ink);
@@ -198,12 +192,12 @@ body[data-zone="row"] .tile.focused::after { opacity: 1; }
 }
 .row-label.swap { opacity: 0; }
 
-/* Intrarea inițială: singurul moment animat automat */
+/* Initial entrance: the only automatically animated moment */
 .booting .tile .art { opacity: 0; transform: translate3d(0, 2.4rem, 0); }
 .tile .art { transition: opacity 520ms var(--ease) var(--d, 0ms), transform 520ms var(--ease) var(--d, 0ms); }
 .booting .detail { opacity: 0; }
 
-/* ------------------------------------------------------ Detaliile jocului */
+/* ------------------------------------------------------ Game details */
 .detail {
   position: absolute; left: var(--pad); bottom: 10.5rem; width: 90rem;
   transition: opacity 200ms var(--ease), transform 200ms var(--ease);
@@ -247,7 +241,7 @@ body[data-zone="actions"] .btn.focused::after { opacity: 1; }
 .platform.xbox { --c: #5dc35d; }
 .platform.local { --c: #f5b84a; }
 
-/* ---------------------------------------------------------- Biblioteca */
+/* ---------------------------------------------------------- Library */
 .lib-head {
   position: absolute; top: 10.5rem; left: var(--pad); right: var(--pad);
   display: flex; align-items: center; gap: 4rem;
@@ -295,14 +289,14 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
   padding: 6rem var(--pad); max-width: 80rem; color: var(--mist); font-size: 2.2rem;
 }
 
-/* ------------------------------------------------------------ Suprapuneri */
+/* ------------------------------------------------------------ Overlays */
 .scrim {
   position: fixed; inset: 0; z-index: 8; background: rgba(2, 4, 10, 0.55);
   opacity: 0; pointer-events: none; transition: opacity 260ms var(--ease);
 }
 .scrim.show { opacity: 1; pointer-events: auto; }
 
-/* Panou lateral (setări, opțiuni, alimentare) */
+/* Side panel (settings, options, power) */
 .panel {
   position: fixed; top: 0; right: 0; bottom: 0; width: 58rem; z-index: 10;
   background: var(--panel);
@@ -315,7 +309,7 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .panel header { padding: 9rem 5rem 2.8rem; }
 .panel h2 { margin: 0; font-size: 3.4rem; font-weight: 300; }
 .panel header p { margin: 1rem 0 0; color: var(--dim); font-size: 1.8rem; }
-/* Lista se derulează; ultimele opțiuni se opresc deasupra indiciilor de butoane. */
+/* The list scrolls; the last options stop above the button hints. */
 .panel ul {
   list-style: none; margin: 0; padding: 0 2rem 11rem; flex: 1; min-height: 0;
   overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
@@ -344,7 +338,7 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .switch.on i { transform: translate3d(2.6rem, 0, 0); }
 .item.focused .switch:not(.on) { background: rgba(10, 16, 34, 0.25); }
 
-/* Meniul rapid (echivalentul centrului de control) */
+/* Quick menu (the equivalent of the control center) */
 .quick {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
   padding: 3.2rem var(--pad) 4.8rem;
@@ -369,7 +363,7 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .qcard.focused { background: #fff; color: #0a1022; transform: translate3d(0, -0.6rem, 0); }
 .qcard.danger:not(.focused) { color: #ffb4b4; }
 
-/* Ecranul de lansare */
+/* Launch screen */
 .launch {
   position: fixed; inset: 0; z-index: 9;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3rem;
@@ -391,7 +385,7 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .launch.started .bar i { width: 100%; animation: none; }
 @keyframes sweep { from { transform: translate3d(-100%, 0, 0); } to { transform: translate3d(250%, 0, 0); } }
 
-/* Notificări */
+/* Notifications */
 .toasts { position: fixed; top: 10rem; right: var(--pad); z-index: 20; display: flex; flex-direction: column; gap: 1.2rem; }
 .toast {
   width: 48rem; padding: 2rem 2.6rem; border-radius: 1.4rem;
@@ -403,12 +397,12 @@ body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
 .toast.error { border-left-color: #ff6b6b; }
 .toast.in { transform: none; }
 
-/* Indicii de butoane */
+/* Button hints */
 .hints {
   position: fixed; right: var(--pad); bottom: 3.6rem; z-index: 12;
   display: flex; justify-content: flex-end; gap: 3.2rem; font-size: 1.6rem; color: var(--mist);
 }
-/* Cu un panou lateral deschis, indiciile devin bara lui de jos, pe lățimea panoului. */
+/* With a side panel open, the hints become its bottom bar, as wide as the panel. */
 body.panel-open .hints {
   right: 0; bottom: 0; width: 58rem;
   padding: 2rem 5rem;
