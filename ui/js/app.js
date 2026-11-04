@@ -54,7 +54,15 @@ function bytes(n) {
 }
 
 const sourceName = (src) => (src === 'local' ? t('source.local') : { steam: 'Steam', xbox: 'Xbox' }[src] || src);
-const timeNow = () => new Date().toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+// The clock follows the Windows setting (24-hour or 12-hour); until it is known, the language's own default applies.
+let clock24 = null;
+const timeNow = () => new Date().toLocaleTimeString(locale(), {
+  hour: '2-digit', minute: '2-digit', ...(clock24 == null ? {} : { hourCycle: clock24 ? 'h23' : 'h12' }),
+});
+async function syncClockFormat() {
+  try { clock24 = await call('clock_24h'); } catch { clock24 = null; }
+  tickClock();
+}
 
 /** Tries each candidate image in turn until one loads. */
 function setSrc(img, list, onFail) {
@@ -219,11 +227,6 @@ function renderRow(keepId) {
     rowTrack.appendChild(tile);
     return tile;
   });
-  const lib = el('div', 'tile tile-library', `<div class="art">${icons.library}<span>${esc(t('tile.library'))}</span></div>`);
-  lib.style.setProperty('--d', `${S.row.length * 40}ms`);
-  lib.addEventListener('click', () => clickRow(S.row.length));
-  rowTrack.appendChild(lib);
-  S.rowEls.push(lib);
 
   const idx = keepId ? S.row.findIndex((g) => g.id === keepId) : -1;
   S.rowIndex = idx >= 0 ? idx : clamp(S.rowIndex, 0, S.rowEls.length - 1);
@@ -235,6 +238,7 @@ function layoutRow(instant) {
   const r = remPx;
   const small = 12 * r, big = 18 * r, gap = 1.6 * r, pad = 7 * r;
   const n = S.rowEls.length;
+  if (!n) { rowLabel.dataset.id = ''; rowLabel.textContent = ''; return; }
   const f = S.rowIndex;
   const xs = [];
   let x = 0;
@@ -294,7 +298,7 @@ let detailId = null;
 
 function renderDetail(force) {
   const g = curGame();
-  const id = g ? g.id : S.games.length ? '__library' : '__empty';
+  const id = g ? g.id : '__empty';
   if (id === detailId && !force) return;
   const changed = id !== detailId;
   detailId = id;
@@ -340,11 +344,6 @@ function renderDetail(force) {
       if (g.sizeBytes) facts.push([t('fact.diskSpace'), esc(bytes(g.sizeBytes))]);
       renderActions();
       detail.append(el('dl', 'facts', facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')));
-    } else if (S.games.length) {
-      detail.append(el('h1', 'detail-title', esc(t('detail.libTitle'))));
-      detail.append(el('p', 'detail-text', esc(t('detail.libText', { n: S.games.length }))));
-      S.actions.push({ label: t('detail.openLibrary'), cls: 'primary', run: () => showView('library') });
-      renderActions();
     } else {
       detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
       detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
@@ -518,7 +517,7 @@ function homeAction(a) {
     } else if (a === 'confirm') {
       const g = curGame();
       sound.play('confirm');
-      if (g) launch(g); else if (S.games.length) showView('library'); else rescan(true);
+      if (g) launch(g); else rescan(true);
     } else if (a === 'options') {
       const g = curGame();
       if (g) { sound.play('confirm'); openGameOptions(g); }
@@ -988,7 +987,6 @@ function openQuick() {
   const running = gameById(S.running?.id);
   const cards = [
     { label: t('quick.home'), icon: icons.home, run: () => { closeAll(); showView('home'); } },
-    { label: t('quick.library'), icon: icons.library, run: () => { closeAll(); showView('library'); } },
   ];
   if (running && S.running.started) cards.unshift({ label: t('game.back'), icon: icons.play, run: () => resumeGame() });
   if (running) cards.push({ label: t('opt.closeNamed', { name: running.name }), icon: icons.close, danger: true, run: () => askCloseGame() });
@@ -1241,8 +1239,9 @@ async function loadTheme() {
 async function boot() {
   measureRem();
   $('#btn-settings').innerHTML = icons.gear;
-  tickClock();
+  syncClockFormat();
   setInterval(tickClock, 10_000);
+  window.addEventListener('focus', syncClockFormat);
   tickBattery();
   setInterval(tickBattery, 30_000);
   tickPads();

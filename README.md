@@ -15,7 +15,7 @@ The interface is available in English (the default) and Romanian. Switch it in *
 - **Battery**: the header shows the PC battery (on laptops and handhelds) and the battery of connected controllers (DualSense / DualShock 4 over HID, Xbox controllers via XInput).
 - **PlayStation controllers**: DualSense and DualShock 4 are detected, and button hints switch to ✕ ○ △.
 - **Guide / PS button** opens the quick menu from anywhere, even in game. The Xbox Guide button is read through XInput, the PS button on DualSense / DualShock 4 directly over HID, so no Steam Input or DS4Windows is needed.
-- **Quick menu**: Home, Library, Close game, Refresh, Settings, Power (sleep, restart, shut down).
+- **Quick menu**: Home, Close game, Refresh, Settings, Power (sleep, restart, shut down).
 - **Start with Windows**, for a console-like experience from boot.
 - **Themes**: custom sounds, music, font and wallpaper without touching the code.
 - **Languages**: English and Romanian, switchable at runtime from Settings.

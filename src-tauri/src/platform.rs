@@ -505,6 +505,24 @@ pub fn battery() -> Option<Battery> {
     })
 }
 
+/// Whether the Windows regional settings use a 24-hour clock (`None` if it can't be read).
+#[cfg(windows)]
+pub fn clock_24h() -> Option<bool> {
+    let out = hidden("reg")
+        .args(["query", r"HKCU\Control Panel\International", "/v", "sTimeFormat"])
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    // The format looks like `HH:mm:ss` (24-hour) or `h:mm:ss tt` (12-hour).
+    let format = text.lines().find_map(|l| l.split_once("REG_SZ").map(|(_, v)| v.trim().to_string()))?;
+    Some(format.contains('H'))
+}
+
+#[cfg(not(windows))]
+pub fn clock_24h() -> Option<bool> {
+    None
+}
+
 #[cfg(not(windows))]
 pub fn battery() -> Option<Battery> {
     None

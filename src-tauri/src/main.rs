@@ -383,6 +383,12 @@ fn theme_file(state: State<'_, AppState>, name: String) -> Result<tauri::ipc::Re
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+/// The clock format chosen in Windows, so Lumen shows the time the same way.
+#[tauri::command(async)]
+fn clock_24h() -> Option<bool> {
+    platform::clock_24h()
+}
+
 #[tauri::command]
 fn battery() -> Option<platform::Battery> {
     platform::battery()
@@ -521,6 +527,7 @@ fn main() {
             open_path,
             theme_file,
             battery,
+            clock_24h,
             pad_batteries,
             audio_outputs,
             set_audio_output,

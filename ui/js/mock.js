@@ -180,6 +180,8 @@ export async function invoke(cmd, args) {
       return;
     case 'theme_file':
       throw new Error('no theme');
+    case 'clock_24h':
+      return true;
     case 'battery':
       return { percent: 64, charging: false, plugged: false };
     case 'pad_batteries':

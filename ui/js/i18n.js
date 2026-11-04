@@ -41,7 +41,6 @@ const dict = {
     'filter.local': 'Local',
 
     // Home screen
-    'tile.library': 'Library',
     'game.play': 'Play',
     'game.back': 'Back to game',
     'game.starting': 'Starting',
@@ -50,9 +49,6 @@ const dict = {
     'fact.lastPlayed': 'Last played',
     'fact.timePlayed': 'Time played',
     'fact.diskSpace': 'Disk space',
-    'detail.libTitle': 'Game library',
-    'detail.libText': ({ n }) => `${enCount(n, 'One game installed', 'games installed')}, from Steam and Xbox.`,
-    'detail.openLibrary': 'Open library',
     'detail.emptyTitle': 'No games found',
     'detail.emptyText': 'Lumen looks for games installed through Steam and the Xbox app. Install a game, then refresh the library.',
     'detail.refresh': 'Refresh library',
@@ -149,7 +145,6 @@ const dict = {
     // Quick menu
     'quick.title': 'Quick menu',
     'quick.home': 'Home',
-    'quick.library': 'Library',
     'quick.running': 'Running now',
     'quick.starting': 'Starting',
 
@@ -197,7 +192,6 @@ const dict = {
     'filter.xbox': 'Xbox',
     'filter.local': 'Locale',
 
-    'tile.library': 'Bibliotecă',
     'game.play': 'Joacă',
     'game.back': 'Înapoi la joc',
     'game.starting': 'Se pornește',
@@ -206,9 +200,6 @@ const dict = {
     'fact.lastPlayed': 'Jucat ultima dată',
     'fact.timePlayed': 'Timp jucat',
     'fact.diskSpace': 'Spațiu ocupat',
-    'detail.libTitle': 'Biblioteca de jocuri',
-    'detail.libText': ({ n }) => `${roCount(n, 'Un joc instalat', 'jocuri instalate')}, din Steam și Xbox.`,
-    'detail.openLibrary': 'Deschide biblioteca',
     'detail.emptyTitle': 'Niciun joc găsit',
     'detail.emptyText': 'Lumen caută jocurile instalate prin Steam și prin aplicația Xbox. Instalează un joc, apoi reîmprospătează biblioteca.',
     'detail.refresh': 'Reîmprospătează biblioteca',
@@ -299,7 +290,6 @@ const dict = {
 
     'quick.title': 'Meniu rapid',
     'quick.home': 'Acasă',
-    'quick.library': 'Bibliotecă',
     'quick.running': 'Rulează acum',
     'quick.starting': 'Se pornește',
 

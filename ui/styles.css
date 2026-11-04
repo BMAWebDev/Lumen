@@ -184,12 +184,6 @@ main { position: fixed; inset: 0; z-index: 2; }
   pointer-events: none;
 }
 body[data-zone="row"] .tile.focused::after { opacity: 1; }
-.tile-library .art {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1.6rem;
-  background: rgba(255, 255, 255, 0.1);
-  font-size: 2.6rem; font-weight: 400;
-}
-.tile-library svg { width: 6rem; height: 6rem; }
 .row-label {
   position: absolute; left: 0; top: 0; max-width: 60rem;
   font-size: 2.3rem; font-weight: 400; color: var(--ink);
