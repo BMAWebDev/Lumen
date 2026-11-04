@@ -38,6 +38,10 @@ fn fire(app: &AppHandle) {
         }
         *last = Some(Instant::now());
     }
+    // Inside another platform (Steam, Epic, Xbox...) the Guide button belongs to that platform.
+    if crate::platforms::in_front() {
+        return;
+    }
     if let Some(w) = app.get_webview_window("main") {
         crate::platform::bring_to_front(&w);
     }

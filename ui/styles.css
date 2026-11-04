@@ -80,7 +80,8 @@ img { -webkit-user-drag: none; }
   content: ""; position: absolute; inset: 0; background: var(--void);
   opacity: 0; transition: opacity 400ms var(--ease);
 }
-body[data-view="library"] #bg::after { opacity: 0.72; }
+body[data-view="library"] #bg::after,
+body[data-view="platforms"] #bg::after { opacity: 0.72; }
 
 /* ---------------------------------------------------------------- Top bar */
 #topbar {
@@ -284,7 +285,16 @@ body[data-zone="filters"] .chip.focused::after { opacity: 1; }
 }
 .gtile.focused .art { transform: scale(1.06); }
 .gtile.focused .name { color: var(--ink); }
-body[data-zone="grid"] .gtile.focused .art::after { opacity: 1; }
+body[data-zone="grid"] .gtile.focused .art::after,
+body[data-zone="plat"] .gtile.focused .art::after { opacity: 1; }
+/* Platform tiles: the platform's icon (or, without one, its initial) over a colored gradient */
+.ptile { position: absolute; inset: 0;
+  background: linear-gradient(150deg, hsl(var(--h) 55% 38%), hsl(calc(var(--h) + 40) 60% 14%)); }
+/* With a real icon the background stays neutral, so every logo reads well. */
+.ptile:not([data-initial]) { background: radial-gradient(90% 90% at 50% 30%, #243158, #0c1226); }
+.ptile .ph-icon { width: 68%; top: 50%; filter: drop-shadow(0 0.6rem 1.4rem rgba(0, 0, 0, 0.5)); }
+.ptile[data-initial]::before { content: attr(data-initial); position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 8rem; font-weight: 700; color: rgba(255, 255, 255, 0.92); text-shadow: 0 0.4rem 2rem rgba(0, 0, 0, 0.35); }
 .empty {
   padding: 6rem var(--pad); max-width: 80rem; color: var(--mist); font-size: 2.2rem;
 }

@@ -8,6 +8,7 @@ mod local;
 mod model;
 mod pads;
 mod platform;
+mod platforms;
 mod steam;
 mod store;
 mod uninstall;
@@ -192,6 +193,23 @@ fn scan_library(app: AppHandle) {
         };
         let _ = app.emit("library", LibraryEvent { games, warnings });
     });
+}
+
+/// The gaming platforms and stores installed on this PC (a quick look at known folders).
+/// Extracting icons the first time runs PowerShell, so this stays off the main thread.
+#[tauri::command(async)]
+fn detect_platforms(state: State<'_, AppState>) -> Result<Vec<platforms::Platform>, String> {
+    let dir = state.inner.lock().map_err(lock_err)?.data_dir.clone();
+    Ok(platforms::detect(&dir))
+}
+
+/// Opens a platform. Lumen steps aside after a moment, like it does for a game, unless that is turned off.
+#[tauri::command]
+fn open_platform(app: AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    platforms::open(&id)?;
+    let minimize = state.inner.lock().map_err(lock_err)?.settings.minimize_on_launch;
+    platforms::watch(&app, &id, minimize);
+    Ok(())
 }
 
 #[tauri::command]
@@ -511,6 +529,8 @@ fn main() {
             get_state,
             app_ready,
             scan_library,
+            detect_platforms,
+            open_platform,
             launch_game,
             cancel_launch,
             close_game,

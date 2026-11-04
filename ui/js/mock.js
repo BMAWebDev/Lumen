@@ -168,6 +168,10 @@ export async function invoke(cmd, args) {
       games.splice(games.indexOf(g), 1);
       return { done: true, message: `${g.name} was uninstalled.` };
     }
+    case 'detect_platforms':
+      return [['steam', 'Steam'], ['epic', 'Epic Games Store'], ['gog', 'GOG Galaxy'], ['ea', 'EA app'], ['battlenet', 'Battle.net'], ['xbox', 'Xbox']].map(([id, name]) => ({ id, name, icon: id === 'gog' || id === 'ea' ? null : uri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="6" y="6" width="52" height="52" rx="12" fill="#fff"/><text x="32" y="43" text-anchor="middle" font-size="32" font-weight="800" fill="#223">${name[0]}</text></svg>`) }));
+    case 'open_platform':
+      return;
     case 'hidden_games':
       return [...hidden];
     case 'restore_game':
