@@ -113,6 +113,8 @@ pub(crate) mod win {
 
     #[link(name = "user32")]
     extern "system" {
+        pub fn GetForegroundWindow() -> isize;
+        pub fn EnumChildWindows(parent: isize, cb: extern "system" fn(isize, isize) -> i32, lparam: isize) -> i32;
         pub fn SetForegroundWindow(hwnd: isize) -> i32;
         pub fn BringWindowToTop(hwnd: isize) -> i32;
         pub fn ShowWindow(hwnd: isize, cmd: i32) -> i32;
@@ -123,6 +125,11 @@ pub(crate) mod win {
         pub fn GetWindow(hwnd: isize, cmd: u32) -> isize;
         pub fn GetWindowRect(hwnd: isize, rect: *mut Rect) -> i32;
         pub fn keybd_event(vk: u8, scan: u8, flags: u32, extra: usize);
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        pub fn DwmGetWindowAttribute(hwnd: isize, attr: u32, value: *mut c_void, size: u32) -> i32;
     }
 
     pub fn wide(s: &str) -> Vec<u16> {
@@ -165,6 +172,113 @@ pub fn process_paths() -> Vec<(u32, String)> {
 
 #[cfg(not(windows))]
 pub fn process_paths() -> Vec<(u32, String)> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+extern "system" fn collect_child_pid(hwnd: isize, lparam: isize) -> i32 {
+    let mut pid = 0u32;
+    unsafe {
+        win::GetWindowThreadProcessId(hwnd, &mut pid);
+        (*(lparam as *mut Vec<u32>)).push(pid);
+    }
+    1
+}
+
+/// The executables behind a window: its own process and, for Microsoft Store apps (whose window
+/// is a frame owned by `ApplicationFrameHost.exe`), the process of the app drawn inside it.
+#[cfg(windows)]
+pub fn window_exes(hwnd: isize) -> Vec<String> {
+    use win::*;
+    let mut pid = 0u32;
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    let mut pids = vec![pid];
+    let paths = process_paths();
+    let is_frame_host = |pid: u32| {
+        paths.iter().any(|(p, path)| *p == pid && path.to_lowercase().ends_with(r"\applicationframehost.exe"))
+    };
+    if is_frame_host(pid) {
+        let mut children: Vec<u32> = Vec::new();
+        unsafe { EnumChildWindows(hwnd, collect_child_pid, &mut children as *mut Vec<u32> as isize) };
+        pids.extend(children.into_iter().filter(|c| !is_frame_host(*c)));
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    paths.into_iter().filter(|(p, _)| pids.contains(p)).map(|(_, path)| path).collect()
+}
+
+#[cfg(windows)]
+struct Visible {
+    min: (i32, i32),
+    wins: Vec<(isize, u32)>,
+}
+
+#[cfg(windows)]
+extern "system" fn collect_visible(hwnd: isize, lparam: isize) -> i32 {
+    use win::*;
+    // SAFETY: `lparam` is the address of a `Visible`, valid for the duration of EnumWindows.
+    let v = unsafe { &mut *(lparam as *mut Visible) };
+    const GW_OWNER: u32 = 4;
+    const DWMWA_CLOAKED: u32 = 14;
+    if unsafe { IsWindowVisible(hwnd) } == 0 || unsafe { GetWindow(hwnd, GW_OWNER) } != 0 || unsafe { IsIconic(hwnd) } != 0 {
+        return 1;
+    }
+    // Closed Store apps can leave a "visible" but cloaked frame behind.
+    let mut cloaked = 0u32;
+    unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut std::ffi::c_void, 4) };
+    if cloaked != 0 {
+        return 1;
+    }
+    let mut r = Rect::default();
+    unsafe { GetWindowRect(hwnd, &mut r) };
+    if r.right - r.left >= v.min.0 && r.bottom - r.top >= v.min.1 {
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        v.wins.push((hwnd, pid));
+    }
+    1
+}
+
+/// The executables that own a visible, normal-sized window right now. Like `window_exes`, it looks
+/// inside the frames of Microsoft Store apps. Minimized and cloaked windows don't count.
+#[cfg(windows)]
+pub fn visible_window_exes(min: (i32, i32)) -> Vec<String> {
+    use win::*;
+    let mut v = Visible { min, wins: Vec::new() };
+    unsafe { EnumWindows(collect_visible, &mut v as *mut Visible as isize) };
+    let paths = process_paths();
+    let is_frame_host = |pid: u32| paths.iter().any(|(p, path)| *p == pid && path.to_lowercase().ends_with(r"\applicationframehost.exe"));
+    let mut pids: Vec<u32> = Vec::new();
+    for (hwnd, pid) in &v.wins {
+        pids.push(*pid);
+        if is_frame_host(*pid) {
+            let mut children: Vec<u32> = Vec::new();
+            unsafe { EnumChildWindows(*hwnd, collect_child_pid, &mut children as *mut Vec<u32> as isize) };
+            pids.extend(children.into_iter().filter(|c| !is_frame_host(*c)));
+        }
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    paths.into_iter().filter(|(p, _)| pids.contains(p)).map(|(_, path)| path).collect()
+}
+
+#[cfg(not(windows))]
+pub fn visible_window_exes(_min: (i32, i32)) -> Vec<String> {
+    Vec::new()
+}
+
+/// The executables behind the window currently in front.
+#[cfg(windows)]
+pub fn foreground_exes() -> Vec<String> {
+    let hwnd = unsafe { win::GetForegroundWindow() };
+    if hwnd == 0 {
+        return Vec::new();
+    }
+    window_exes(hwnd)
+}
+
+#[cfg(not(windows))]
+pub fn foreground_exes() -> Vec<String> {
     Vec::new()
 }
 

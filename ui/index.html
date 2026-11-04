@@ -17,6 +17,7 @@
     <nav class="tabs">
       <button id="tab-home" class="tab active" data-i18n="tab.games">Games</button>
       <button id="tab-library" class="tab" data-i18n="tab.library">Library</button>
+      <button id="tab-platforms" class="tab" data-i18n="tab.platforms">Platforms</button>
     </nav>
     <div class="status">
       <div id="running-pill" class="running-pill" hidden><i></i><span></span></div>
@@ -45,6 +46,16 @@
       </div>
       <div id="grid-wrap" class="grid-wrap">
         <div id="grid" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="platforms" class="view hidden">
+      <div class="lib-head">
+        <h2 data-i18n="plat.title">Your platforms</h2>
+        <span id="plat-count" class="lib-count"></span>
+      </div>
+      <div class="grid-wrap">
+        <div id="plat-grid" class="grid"></div>
       </div>
     </section>
   </main>

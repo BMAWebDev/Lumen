@@ -129,10 +129,14 @@ const S = {
   libEls: [],
   libIndex: 0,
   gridScroll: 0,
+  platforms: [],
+  platIndex: 0,
+  platEls: [],
   device: 'keyboard',
   pad: 'xbox',
   booting: true,
 };
+const VIEWS = ['home', 'library', 'platforms'];
 const stack = []; // open overlays (quick menu, panels, launch screen)
 
 const stat = (id) => S.stats[id] || { playtimeSec: 0, lastPlayed: 0, launches: 0 };
@@ -443,8 +447,8 @@ function renderLibrary(keepId) {
   scrollGrid();
 }
 
-function gridCols() {
-  const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length;
+function gridCols(g = grid) {
+  const cols = getComputedStyle(g).gridTemplateColumns.split(' ').filter(Boolean).length;
   return Math.max(1, cols);
 }
 
@@ -466,9 +470,80 @@ function scrollGrid() {
 }
 
 // ======================================================================
+// Platforms: the gaming launchers and stores found on this PC
+// ======================================================================
+const platGrid = $('#plat-grid');
+let platLoaded = false;
+
+function renderPlatforms() {
+  platGrid.textContent = '';
+  S.platEls = S.platforms.map((p, i) => {
+    const tile = el('div', 'gtile');
+    const art = el('div', 'art');
+    const clip = el('div', 'clip');
+    const face = el('div', 'ptile');
+    face.style.setProperty('--h', hue(p.id));
+    if (p.icon) {
+      // The platform's real icon, centered like the icon of a local game.
+      const ic = el('i', 'ph-icon');
+      ic.style.backgroundImage = `url("${fileUrl(p.icon).replace(/"/g, '%22')}")`;
+      face.appendChild(ic);
+    } else {
+      face.dataset.initial = p.name.charAt(0).toUpperCase();
+    }
+    clip.appendChild(face);
+    art.appendChild(clip);
+    tile.append(art, el('div', 'name', esc(p.name)));
+    tile.addEventListener('click', () => {
+      if (stack.length) return;
+      if (S.zone === 'plat' && S.platIndex === i) { sound.play('confirm'); openPlatform(p); return; }
+      S.zone = 'plat'; S.platIndex = i; sound.play('move'); updateFocus();
+    });
+    platGrid.appendChild(tile);
+    return tile;
+  });
+  if (!S.platforms.length && platLoaded) platGrid.appendChild(el('div', 'empty', esc(t('plat.empty'))));
+  const n = S.platforms.length;
+  $('#plat-count').textContent = n ? t('plat.count', { n }) : '';
+  S.platIndex = clamp(S.platIndex, 0, Math.max(0, n - 1));
+  updateFocus();
+}
+
+async function loadPlatforms() {
+  try { S.platforms = (await call('detect_platforms')) || []; } catch (e) { S.platforms = []; toast(String(e), 'error'); }
+  platLoaded = true;
+  renderPlatforms();
+  if (S.view === 'platforms' && S.zone === 'tabs' && S.tabIndex === 2 && S.platforms.length) S.zone = 'plat';
+  updateFocus();
+}
+
+async function openPlatform(p) {
+  try {
+    await call('open_platform', { id: p.id });
+    toast(t('plat.opening', { name: p.name }));
+  } catch (e) { toast(String(e), 'error'); }
+}
+
+function platformsAction(a) {
+  const cols = gridCols(platGrid);
+  const n = S.platforms.length;
+  let ni = S.platIndex;
+  if (a === 'left') ni = S.platIndex % cols === 0 ? S.platIndex : S.platIndex - 1;
+  else if (a === 'right') ni = Math.min(n - 1, S.platIndex + 1);
+  else if (a === 'down') ni = S.platIndex + cols < n ? S.platIndex + cols : (Math.floor(S.platIndex / cols) < Math.floor((n - 1) / cols) ? n - 1 : S.platIndex);
+  else if (a === 'up') {
+    if (S.platIndex < cols) { goTabs(2); return; }
+    ni = S.platIndex - cols;
+  } else if (a === 'confirm') { const p = S.platforms[S.platIndex]; if (p) { sound.play('confirm'); openPlatform(p); } return; }
+  else if (a === 'back') { sound.play('back'); showView('home'); return; }
+  if (ni !== S.platIndex) { S.platIndex = ni; sound.play('move'); updateFocus(); }
+  else if (a === 'left' || a === 'right') bump(S.platEls[S.platIndex], a === 'left' ? -1 : 1);
+}
+
+// ======================================================================
 // Focus and views
 // ======================================================================
-const tabEls = () => [$('#tab-home'), $('#tab-library'), $('#btn-settings')];
+const tabEls = () => [$('#tab-home'), $('#tab-library'), $('#tab-platforms'), $('#btn-settings')];
 
 function updateFocus() {
   document.querySelectorAll('.focused').forEach((n) => n.classList.remove('focused'));
@@ -480,6 +555,7 @@ function updateFocus() {
   else if (S.zone === 'actions') target = S.actions[S.actionIndex]?.el;
   else if (S.zone === 'filters') target = filtersEl.children[S.filterIndex];
   else if (S.zone === 'grid') target = S.libEls[S.libIndex];
+  else if (S.zone === 'plat') target = S.platEls[S.platIndex];
   target?.classList.add('focused');
   updateHints();
 }
@@ -487,13 +563,17 @@ function updateFocus() {
 function showView(view) {
   if (S.view === view) return;
   S.view = view;
-  $('#home').classList.toggle('hidden', view !== 'home');
-  $('#library').classList.toggle('hidden', view !== 'library');
-  $('#tab-home').classList.toggle('active', view === 'home');
-  $('#tab-library').classList.toggle('active', view === 'library');
+  for (const v of VIEWS) {
+    $(`#${v}`).classList.toggle('hidden', view !== v);
+    $(`#tab-${v}`).classList.toggle('active', view === v);
+  }
   if (view === 'library') {
     S.zone = S.libList.length ? 'grid' : 'filters';
     scrollGrid();
+  } else if (view === 'platforms') {
+    S.zone = S.platforms.length ? 'plat' : 'tabs';
+    S.tabIndex = 2;
+    loadPlatforms();
   } else {
     S.zone = 'row';
     setBackground(curGame());
@@ -577,6 +657,16 @@ function jumpToEnd(last) {
     S.rowIndex = ni;
     sound.play('move');
     onRowFocus();
+  } else if (S.view === 'platforms') {
+    const n = S.platforms.length;
+    if (!n) return;
+    const ni = last ? n - 1 : 0;
+    const moved = S.zone !== 'plat' || ni !== S.platIndex;
+    S.zone = 'plat';
+    if (!moved) { bump(S.platEls[ni], last ? 1 : -1); return; }
+    S.platIndex = ni;
+    sound.play('move');
+    updateFocus();
   } else {
     const n = S.libList.length;
     if (!n) return;
@@ -600,15 +690,16 @@ function goTabs(index) {
 
 function tabsAction(a) {
   if (a === 'left' || a === 'right') {
-    const ni = clamp(S.tabIndex + (a === 'left' ? -1 : 1), 0, 2);
+    const ni = clamp(S.tabIndex + (a === 'left' ? -1 : 1), 0, 3);
     if (ni !== S.tabIndex) { S.tabIndex = ni; sound.play('move'); updateFocus(); }
   } else if (a === 'confirm') {
     sound.play('confirm');
-    if (S.tabIndex === 0) showView('home');
-    else if (S.tabIndex === 1) showView('library');
+    if (S.tabIndex < VIEWS.length) showView(VIEWS[S.tabIndex]);
     else openSettings();
   } else if (a === 'down' || a === 'back') {
-    S.zone = S.view === 'home' ? 'row' : (S.libList.length ? 'grid' : 'filters');
+    S.zone = S.view === 'home' ? 'row'
+      : S.view === 'platforms' ? (S.platforms.length ? 'plat' : 'tabs')
+      : (S.libList.length ? 'grid' : 'filters');
     sound.play(a === 'back' ? 'back' : 'move');
     updateFocus();
   }
@@ -620,13 +711,14 @@ function onAction(a) {
   if (top) { top.handle(a); updateHints(); return; }
   if (a === 'menu') { openQuick(); return; }
   if (a === 'prevTab' || a === 'nextTab') {
-    const v = a === 'prevTab' ? 'home' : 'library';
+    const v = VIEWS[clamp(VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, VIEWS.length - 1)];
     if (v !== S.view) { sound.play('move'); showView(v); }
     return;
   }
   if (a === 'first' || a === 'last') { jumpToEnd(a === 'last'); return; }
   if (S.zone === 'tabs') tabsAction(a);
   else if (S.view === 'home') homeAction(a);
+  else if (S.view === 'platforms') platformsAction(a);
   else libraryAction(a);
 }
 
@@ -784,6 +876,7 @@ function refreshLanguage() {
   renderFilters();
   renderRow(curGame()?.id);
   renderLibrary(S.libList[S.libIndex]?.id);
+  renderPlatforms();
   updateRunning();
   updateHints();
 }
@@ -1141,6 +1234,7 @@ function updateHints() {
   if (top?.type === 'launch') list = S.running?.started ? [['menu', 'hint.menu']] : [['back', 'hint.cancel'], ['menu', 'hint.menu']];
   else if (top) list = [['confirm', 'hint.select'], ['back', 'hint.back']];
   else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['menu', 'hint.menu']];
+  else if (S.view === 'platforms' && S.zone === 'plat') list = [['confirm', 'hint.open'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else if (S.view === 'library' && S.zone === 'grid') list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else list = [['confirm', 'hint.select'], ['menu', 'hint.menu']];
   $('#hints').innerHTML = list.map(([k, label]) => `<span class="hint"><span class="glyph">${g[k]}</span>${esc(t(label))}</span>`).join('');
@@ -1268,6 +1362,7 @@ async function boot() {
 
   $('#tab-home').addEventListener('click', () => { if (!stack.length) { sound.play('move'); showView('home'); } });
   $('#tab-library').addEventListener('click', () => { if (!stack.length) { sound.play('move'); showView('library'); } });
+  $('#tab-platforms').addEventListener('click', () => { if (!stack.length) { sound.play('move'); showView('platforms'); } });
   $('#btn-settings').addEventListener('click', () => { if (!stack.length) { sound.play('confirm'); openSettings(); } });
 
   // The saved state is shown right away; the full scan comes in the background.

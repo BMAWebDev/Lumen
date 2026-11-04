@@ -21,6 +21,7 @@ const dict = {
     // Static page
     'tab.games': 'Games',
     'tab.library': 'Library',
+    'tab.platforms': 'Platforms',
     'lib.title': 'Your library',
     'aria.settings': 'Settings',
 
@@ -60,6 +61,12 @@ const dict = {
     'lib.emptyAll': 'The library is empty. Install a game from Steam or the Xbox app, then refresh the library from the quick menu.',
     'scan.start': 'Looking for installed games…',
     'scan.done': ({ n }) => `Library updated: ${enCount(n, 'one game', 'games')}.`,
+
+    // Platforms
+    'plat.title': 'Your platforms',
+    'plat.count': ({ n }) => enCount(n, 'One platform', 'platforms'),
+    'plat.empty': 'No gaming platforms were found on this PC. Install Steam, the Epic Games Store, GOG Galaxy or another launcher and it will show up here.',
+    'plat.opening': ({ name }) => `Opening ${name}…`,
 
     // Settings
     'settings.title': 'Settings',
@@ -170,11 +177,13 @@ const dict = {
     'hint.menu': 'Menu',
     'hint.play': 'Play',
     'hint.options': 'Options',
+    'hint.open': 'Open',
   },
 
   ro: {
     'tab.games': 'Jocuri',
     'tab.library': 'Bibliotecă',
+    'tab.platforms': 'Platforme',
     'lib.title': 'Biblioteca ta',
     'aria.settings': 'Setări',
 
@@ -210,6 +219,11 @@ const dict = {
     'lib.emptyAll': 'Biblioteca e goală. Instalează un joc din Steam sau din aplicația Xbox, apoi reîmprospătează biblioteca din meniul rapid.',
     'scan.start': 'Se caută jocurile instalate…',
     'scan.done': ({ n }) => `Biblioteca a fost actualizată: ${roCount(n, 'un joc', 'jocuri')}.`,
+
+    'plat.title': 'Platformele tale',
+    'plat.count': ({ n }) => roCount(n, 'O platformă', 'platforme'),
+    'plat.empty': 'Nu am găsit nicio platformă de jocuri pe acest PC. Instalează Steam, Epic Games Store, GOG Galaxy sau alt launcher și va apărea aici.',
+    'plat.opening': ({ name }) => `Se deschide ${name}…`,
 
     'settings.title': 'Setări',
     'settings.autostart': 'Pornește odată cu Windows',
@@ -313,6 +327,7 @@ const dict = {
     'hint.menu': 'Meniu',
     'hint.play': 'Joacă',
     'hint.options': 'Opțiuni',
+    'hint.open': 'Deschide',
   },
 };
 
