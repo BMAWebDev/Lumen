@@ -132,11 +132,16 @@ const S = {
   platforms: [],
   platIndex: 0,
   platEls: [],
+  setCat: 0,
+  setIndex: 0,
+  setItems: [],
+  setEls: [],
   device: 'keyboard',
   pad: 'xbox',
   booting: true,
 };
-const VIEWS = ['home', 'library', 'platforms'];
+const VIEWS = ['home', 'library', 'platforms']; // the views with a tab; Settings is a page of its own, opened from the gear
+const ALL_VIEWS = [...VIEWS, 'settings'];
 const stack = []; // open overlays (quick menu, panels, launch screen)
 
 const stat = (id) => S.stats[id] || { playtimeSec: 0, lastPlayed: 0, launches: 0 };
@@ -556,18 +561,26 @@ function updateFocus() {
   else if (S.zone === 'filters') target = filtersEl.children[S.filterIndex];
   else if (S.zone === 'grid') target = S.libEls[S.libIndex];
   else if (S.zone === 'plat') target = S.platEls[S.platIndex];
+  else if (S.zone === 'scat') target = setCatsEl.children[S.setCat];
+  else if (S.zone === 'sitems') target = S.setEls[S.setIndex];
   target?.classList.add('focused');
+  if (S.zone === 'sitems') target?.scrollIntoView({ block: 'nearest' });
   updateHints();
 }
 
 function showView(view) {
   if (S.view === view) return;
   S.view = view;
-  for (const v of VIEWS) {
+  for (const v of ALL_VIEWS) {
     $(`#${v}`).classList.toggle('hidden', view !== v);
-    $(`#tab-${v}`).classList.toggle('active', view === v);
+    $(`#tab-${v}`)?.classList.toggle('active', view === v);
   }
-  if (view === 'library') {
+  if (view === 'settings') {
+    S.zone = 'scat';
+    S.tabIndex = 3;
+    S.setIndex = 0;
+    renderSettings();
+  } else if (view === 'library') {
     S.zone = S.libList.length ? 'grid' : 'filters';
     scrollGrid();
   } else if (view === 'platforms') {
@@ -698,6 +711,7 @@ function tabsAction(a) {
     else openSettings();
   } else if (a === 'down' || a === 'back') {
     S.zone = S.view === 'home' ? 'row'
+      : S.view === 'settings' ? 'scat'
       : S.view === 'platforms' ? (S.platforms.length ? 'plat' : 'tabs')
       : (S.libList.length ? 'grid' : 'filters');
     sound.play(a === 'back' ? 'back' : 'move');
@@ -711,14 +725,16 @@ function onAction(a) {
   if (top) { top.handle(a); updateHints(); return; }
   if (a === 'menu') { openQuick(); return; }
   if (a === 'prevTab' || a === 'nextTab') {
+    if (S.view === 'settings') { if (S.zone !== 'tabs') selectCat(S.setCat + (a === 'prevTab' ? -1 : 1)); return; }
     const v = VIEWS[clamp(VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, VIEWS.length - 1)];
     if (v !== S.view) { sound.play('move'); showView(v); }
     return;
   }
-  if (a === 'first' || a === 'last') { jumpToEnd(a === 'last'); return; }
+  if (a === 'first' || a === 'last') { if (S.view !== 'settings') jumpToEnd(a === 'last'); return; }
   if (S.zone === 'tabs') tabsAction(a);
   else if (S.view === 'home') homeAction(a);
   else if (S.view === 'platforms') platformsAction(a);
+  else if (S.view === 'settings') settingsAction(a);
   else libraryAction(a);
 }
 
@@ -806,38 +822,165 @@ function confirmPanel(title, note, label, action) {
   }));
 }
 
-function openSettings() {
+const setCatsEl = $('#set-cats');
+const setListEl = $('#set-list');
+let setToken = 0;
+
+// Results of slow backend calls (PowerShell/COM), kept after the first load so menus open at once.
+// A cached value is returned immediately while a fresh one is fetched; `onChange` runs if it differs.
+const cacheStore = {};
+function cachedCall(key, cmd, onChange) {
+  const hit = cacheStore[key];
+  const fresh = call(cmd).then((v) => {
+    const changed = JSON.stringify(v) !== JSON.stringify(cacheStore[key]);
+    cacheStore[key] = v;
+    if (hit && changed) onChange?.();
+    return v;
+  });
+  if (!hit) return fresh;
+  fresh.catch(() => {}); // the stale value stays on screen if the refresh fails
+  return Promise.resolve(hit);
+}
+
+/** Redraws the open Settings category when background data for it changed. */
+const refreshCat = (id) => () => { if (S.view === 'settings' && settingsCats()[S.setCat]?.id === id) renderSettings(); };
+
+/** The settings, grouped in categories. Each `load` returns `{ items, note }` (it may be async). */
+function settingsCats() {
   const toggle = (key, label, desc) => ({
     label, desc,
     toggle: () => !!S.settings[key],
     action: () => setSetting(key, !S.settings[key]),
   });
   const langName = LANGUAGES.find((l) => l.code === getLang())?.name || '';
-  pushOverlay(listPanel({
-    title: t('settings.title'),
-    note: `Lumen ${S.version}`,
-    items: [
-      toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
-      toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
-      toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
-      toggle('sounds', t('settings.sounds')),
-      toggle('music', t('settings.music'), S.theme.music ? '' : t('settings.music.desc')),
-      toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
-      toggle('reduceMotion', t('settings.reduceMotion')),
-      { label: t('settings.language'), desc: langName, action: openLanguage },
-      { label: t('settings.audio'), desc: t('settings.audio.desc'), action: openAudioOutputs },
-      { label: t('bt.title'), desc: t('settings.bluetooth.desc'), action: openBluetooth },
-      { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
-      {
-        label: t('settings.folders'),
-        desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
-        action: openGameFolders,
-      },
-      { label: t('settings.hidden'), desc: t('settings.hidden.desc'), action: openHiddenGames },
-      { label: t('settings.theme'), desc: t('settings.theme.desc'), action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
-      { label: t('detail.refresh'), action: () => { closeTop(true); rescan(true); } },
-    ],
-  }));
+  return [
+    {
+      id: 'general', label: t('set.general'), icon: icons.gear,
+      load: () => ({
+        note: `Lumen ${S.version}`,
+        items: [
+          { label: t('settings.language'), desc: langName, action: openLanguage },
+          toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
+          toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
+          toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
+        ],
+      }),
+    },
+    {
+      id: 'library', label: t('set.library'), icon: icons.library,
+      load: () => ({
+        items: [
+          { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
+          {
+            label: t('settings.folders'),
+            desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
+            action: openGameFolders,
+          },
+          { label: t('settings.hidden'), desc: t('settings.hidden.desc'), action: openHiddenGames },
+          toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
+          { label: t('detail.refresh'), action: () => { closeAll(); rescan(true); } },
+        ],
+      }),
+    },
+    { id: 'audio', label: t('set.audio'), icon: icons.speaker, load: audioLoad },
+    { id: 'bluetooth', label: t('bt.title'), icon: icons.bluetooth, load: bluetoothLoad },
+    {
+      id: 'appearance', label: t('set.appearance'), icon: icons.palette,
+      load: () => ({
+        items: [
+          toggle('reduceMotion', t('settings.reduceMotion')),
+          { label: t('settings.theme'), desc: t('settings.theme.desc'), action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
+        ],
+      }),
+    },
+  ];
+}
+
+/** Opens the Settings page, optionally on one category (`general`, `library`, `audio`, `bluetooth`, `appearance`). */
+function openSettings(catId) {
+  closeAll();
+  const idx = settingsCats().findIndex((c) => c.id === catId);
+  if (idx >= 0) S.setCat = idx;
+  if (S.view !== 'settings') { showView('settings'); return; }
+  S.zone = 'scat';
+  S.setIndex = 0;
+  renderSettings();
+  updateFocus();
+}
+
+/** Draws the category list and the items of the selected category. */
+async function renderSettings() {
+  const cats = settingsCats();
+  S.setCat = clamp(S.setCat, 0, cats.length - 1);
+  setCatsEl.textContent = '';
+  cats.forEach((c, i) => {
+    const b = el('button', 'set-cat' + (i === S.setCat ? ' active' : ''), `${c.icon}<span>${esc(c.label)}</span>`);
+    b.addEventListener('click', () => { if (stack.length) return; S.zone = 'scat'; selectCat(i); });
+    setCatsEl.appendChild(b);
+  });
+  $('#set-title').textContent = cats[S.setCat].label;
+  const me = ++setToken;
+  let r;
+  try { r = await cats[S.setCat].load(); } catch (e) { r = { items: [], note: String(e) }; }
+  if (me !== setToken) return; // another category was picked while this one loaded
+  S.setItems = r.items;
+  $('#set-note').textContent = r.note || '';
+  renderSettingsItems();
+}
+
+function renderSettingsItems() {
+  setListEl.textContent = '';
+  S.setEls = S.setItems.map((it, i) => {
+    if (it.group) setListEl.appendChild(el('li', 'set-group', esc(it.group)));
+    const li = el('li', 'item' + (it.danger ? ' danger' : ''));
+    li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
+      (it.toggle ? `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>` : '');
+    li.addEventListener('click', () => {
+      if (stack.length) return;
+      S.zone = 'sitems'; S.setIndex = i; updateFocus(); activateSetting();
+    });
+    setListEl.appendChild(li);
+    return li;
+  });
+  S.setIndex = clamp(S.setIndex, 0, Math.max(0, S.setItems.length - 1));
+  if (S.zone === 'sitems' && !S.setItems.length) S.zone = 'scat';
+  updateFocus();
+}
+
+function selectCat(i) {
+  const n = settingsCats().length;
+  const ni = clamp(i, 0, n - 1);
+  if (ni === S.setCat) return;
+  S.setCat = ni;
+  S.setIndex = 0;
+  sound.play('move');
+  renderSettings();
+  updateFocus();
+}
+
+async function activateSetting() {
+  const it = S.setItems[S.setIndex];
+  if (!it) return;
+  sound.play('confirm');
+  const cat = S.setCat;
+  await it.action?.();
+  if (it.toggle && S.view === 'settings' && cat === S.setCat) renderSettingsItems();
+}
+
+function settingsAction(a) {
+  if (S.zone === 'scat') {
+    if (a === 'up') { if (S.setCat === 0) goTabs(3); else selectCat(S.setCat - 1); }
+    else if (a === 'down') selectCat(S.setCat + 1);
+    else if (a === 'right' || a === 'confirm') {
+      if (S.setItems.length) { S.zone = 'sitems'; sound.play('move'); updateFocus(); }
+    } else if (a === 'back') { sound.play('back'); showView('home'); }
+    return;
+  }
+  if (a === 'up' || a === 'down') {
+    const ni = clamp(S.setIndex + (a === 'up' ? -1 : 1), 0, S.setItems.length - 1);
+    if (ni !== S.setIndex) { S.setIndex = ni; sound.play('move'); updateFocus(); }
+  } else if (a === 'confirm') activateSetting();
+  else if (a === 'left' || a === 'back') { S.zone = 'scat'; sound.play('back'); updateFocus(); }
 }
 
 /** Language picker. The choice is saved by the backend, which also uses it for its own messages. */
@@ -861,7 +1004,6 @@ async function setLanguage(code) {
     closeAll();
     refreshLanguage();
     toast(t('language.changed'));
-    openSettings();
   } catch (e) {
     toast(String(e), 'error');
   }
@@ -878,6 +1020,7 @@ function refreshLanguage() {
   renderRow(curGame()?.id);
   renderLibrary(S.libList[S.libIndex]?.id);
   renderPlatforms();
+  if (S.view === 'settings') renderSettings();
   updateRunning();
   updateHints();
 }
@@ -914,53 +1057,59 @@ function removeGame(g) {
   });
 }
 
-// Changes the Windows default audio device, so it applies to games too.
-async function openAudioOutputs() {
+// The audio category: sounds and music, plus the Windows default output device (it applies to games too).
+async function audioLoad() {
+  const toggle = (key, label, desc) => ({ label, desc, toggle: () => !!S.settings[key], action: () => setSetting(key, !S.settings[key]) });
+  const items = [
+    toggle('sounds', t('settings.sounds')),
+    toggle('music', t('settings.music'), S.theme.music ? '' : t('settings.music.desc')),
+  ];
   let devices = [];
-  try { devices = (await call('audio_outputs')) || []; } catch (e) { toast(String(e), 'error'); return; }
-  pushOverlay(listPanel({
-    title: t('audio.title'),
-    note: devices.length ? t('audio.note') : t('audio.none'),
-    items: devices.map((d) => ({
-      label: d.name,
-      toggle: () => d.current,
-      action: async () => {
-        if (d.current) return;
-        try {
-          await call('set_audio_output', { id: d.id });
-          devices.forEach((x) => { x.current = x.id === d.id; });
-          toast(t('audio.done', { name: d.name }));
-        } catch (e) { toast(String(e), 'error'); }
-      },
-    })),
+  let note = t('audio.note');
+  try { devices = (await cachedCall('audio', 'audio_outputs', refreshCat('audio'))) || []; } catch (e) { note = String(e); }
+  if (!devices.length && note === t('audio.note')) note = t('audio.none');
+  devices.forEach((d, i) => items.push({
+    group: i === 0 ? t('audio.title') : '',
+    label: d.name,
+    toggle: () => d.current,
+    action: async () => {
+      if (d.current) return;
+      try {
+        await call('set_audio_output', { id: d.id });
+        devices.forEach((x) => { x.current = x.id === d.id; });
+        toast(t('audio.done', { name: d.name }));
+      } catch (e) { toast(String(e), 'error'); }
+    },
   }));
+  return { items, note };
 }
 
 // Bluetooth: paired devices, adding a new one (pairing) and removing one (unpairing).
-async function openBluetooth(silent) {
+async function bluetoothLoad() {
   let devices = [];
-  try { devices = (await call('bluetooth_paired')) || []; } catch (e) { toast(String(e), 'error'); return; }
+  try { devices = (await cachedCall('bluetooth', 'bluetooth_paired', refreshCat('bluetooth'))) || []; } catch (e) { return { items: [], note: String(e) }; }
   const items = devices.map((d) => ({
     label: d.name,
     desc: d.connected ? t('bt.connected') : t('bt.paired'),
     action: () => confirmPanel(d.name, t('bt.removeNote'), t('bt.remove'), () => removeBluetooth(d)),
   }));
   items.push({ label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
-  pushOverlay(listPanel({ title: t('bt.title'), note: devices.length ? t('bt.note') : t('bt.none'), items }), silent === true);
+  return { items, note: devices.length ? t('bt.note') : t('bt.none') };
 }
 
-/** Closes the open panels and shows the Bluetooth list again with fresh data. */
-function reopenBluetooth() {
+/** Closes the open panels and reloads the Bluetooth list. */
+function reloadBluetooth() {
   closeAll();
-  openBluetooth(true);
+  if (S.view === 'settings') renderSettings();
 }
 
 async function removeBluetooth(d) {
   try {
     await call('bluetooth_remove', { id: d.id });
+    if (cacheStore.bluetooth) cacheStore.bluetooth = cacheStore.bluetooth.filter((x) => x.id !== d.id);
     toast(t('bt.removed', { name: d.name }));
   } catch (e) { toast(String(e), 'error'); }
-  reopenBluetooth();
+  reloadBluetooth();
 }
 
 let btBusy = false;
@@ -989,8 +1138,9 @@ async function pairBluetooth(d) {
   toast(t('bt.pairing', { name: d.name }));
   try {
     await call('bluetooth_pair', { id: d.id });
+    delete cacheStore.bluetooth; // the new device shows up with its real state
     toast(t('bt.pairDone', { name: d.name }));
-    reopenBluetooth();
+    reloadBluetooth();
   } catch (e) { toast(String(e), 'error'); }
 }
 
@@ -1038,7 +1188,7 @@ async function openHiddenGames() {
 
 // Each subfolder of a folder listed here shows up in the library as a "Local" game.
 function openGameFolders() {
-  const reopen = () => { closeAll(); openSettings(); openGameFolders(); };
+  const reopen = () => { closeAll(); renderSettings(); openGameFolders(); };
   const folders = S.settings.gameFolders || [];
   pushOverlay(listPanel({
     title: t('folders.title'),
@@ -1144,7 +1294,6 @@ function openQuick() {
   if (running) cards.push({ label: t('opt.closeNamed', { name: running.name }), icon: icons.close, danger: true, run: () => askCloseGame() });
   cards.push(
     { label: t('detail.refresh'), icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
-    { label: t('bt.title'), icon: icons.bluetooth, run: () => openBluetooth() },
     { label: t('settings.title'), icon: icons.gear, run: () => openSettings() },
     { label: t('power.title'), icon: icons.power, run: () => openPower() },
   );
@@ -1294,6 +1443,8 @@ function updateHints() {
   if (top?.type === 'launch') list = S.running?.started ? [['menu', 'hint.menu']] : [['back', 'hint.cancel'], ['menu', 'hint.menu']];
   else if (top) list = [['confirm', 'hint.select'], ['back', 'hint.back']];
   else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['menu', 'hint.menu']];
+  else if (S.view === 'settings' && S.zone === 'scat') list = [['confirm', 'hint.select'], ['back', 'hint.back'], ['menu', 'hint.menu']];
+  else if (S.view === 'settings' && S.zone === 'sitems') list = [['confirm', 'hint.select'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else if (S.view === 'platforms' && S.zone === 'plat') list = [['confirm', 'hint.open'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else if (S.view === 'library' && S.zone === 'grid') list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else list = [['confirm', 'hint.select'], ['menu', 'hint.menu']];
@@ -1492,6 +1643,9 @@ async function boot() {
   document.body.classList.remove('booting');
   updateHints();
   rescan(false);
+  // Warm the slow menus once Lumen is up, so they open instantly later (staggered to keep the start light).
+  setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); loadPlatforms(); }, 1500);
+  setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
 }
 
 boot();
