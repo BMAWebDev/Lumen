@@ -826,6 +826,7 @@ function openSettings() {
       toggle('reduceMotion', t('settings.reduceMotion')),
       { label: t('settings.language'), desc: langName, action: openLanguage },
       { label: t('settings.audio'), desc: t('settings.audio.desc'), action: openAudioOutputs },
+      { label: t('bt.title'), desc: t('settings.bluetooth.desc'), action: openBluetooth },
       { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
       {
         label: t('settings.folders'),
@@ -933,6 +934,64 @@ async function openAudioOutputs() {
       },
     })),
   }));
+}
+
+// Bluetooth: paired devices, adding a new one (pairing) and removing one (unpairing).
+async function openBluetooth(silent) {
+  let devices = [];
+  try { devices = (await call('bluetooth_paired')) || []; } catch (e) { toast(String(e), 'error'); return; }
+  const items = devices.map((d) => ({
+    label: d.name,
+    desc: d.connected ? t('bt.connected') : t('bt.paired'),
+    action: () => confirmPanel(d.name, t('bt.removeNote'), t('bt.remove'), () => removeBluetooth(d)),
+  }));
+  items.push({ label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+  pushOverlay(listPanel({ title: t('bt.title'), note: devices.length ? t('bt.note') : t('bt.none'), items }), silent === true);
+}
+
+/** Closes the open panels and shows the Bluetooth list again with fresh data. */
+function reopenBluetooth() {
+  closeAll();
+  openBluetooth(true);
+}
+
+async function removeBluetooth(d) {
+  try {
+    await call('bluetooth_remove', { id: d.id });
+    toast(t('bt.removed', { name: d.name }));
+  } catch (e) { toast(String(e), 'error'); }
+  reopenBluetooth();
+}
+
+let btBusy = false;
+async function scanBluetooth() {
+  if (btBusy) return;
+  btBusy = true;
+  // The inquiry takes a while: a panel with only "Cancel" stays up, and the results replace it.
+  let cancelled = false;
+  const wait = listPanel({
+    title: t('bt.scanning'), note: t('bt.scanning.note'),
+    items: [{ label: t('common.cancel'), action: () => { cancelled = true; closeTop(); } }],
+  });
+  pushOverlay(wait);
+  let found = [];
+  try { found = (await call('bluetooth_scan')) || []; } catch (e) { if (!cancelled) toast(String(e), 'error'); }
+  btBusy = false;
+  if (cancelled) return;
+  if (stack[stack.length - 1] !== wait) return;
+  closeTop(true);
+  const items = found.map((d) => ({ label: d.name, action: () => pairBluetooth(d) }));
+  items.push({ label: t('bt.rescan'), action: () => { closeTop(true); scanBluetooth(); } });
+  pushOverlay(listPanel({ title: t('bt.add'), note: found.length ? t('bt.found.note') : t('bt.found.none'), items }), true);
+}
+
+async function pairBluetooth(d) {
+  toast(t('bt.pairing', { name: d.name }));
+  try {
+    await call('bluetooth_pair', { id: d.id });
+    toast(t('bt.pairDone', { name: d.name }));
+    reopenBluetooth();
+  } catch (e) { toast(String(e), 'error'); }
 }
 
 // Steam and games with an uninstaller ask for confirmation in their own window; Xbox games are uninstalled directly.
@@ -1085,6 +1144,7 @@ function openQuick() {
   if (running) cards.push({ label: t('opt.closeNamed', { name: running.name }), icon: icons.close, danger: true, run: () => askCloseGame() });
   cards.push(
     { label: t('detail.refresh'), icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
+    { label: t('bt.title'), icon: icons.bluetooth, run: () => openBluetooth() },
     { label: t('settings.title'), icon: icons.gear, run: () => openSettings() },
     { label: t('power.title'), icon: icons.power, run: () => openPower() },
   );

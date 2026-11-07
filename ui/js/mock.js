@@ -104,6 +104,8 @@ const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music:
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
+let btPaired = [{ id: 'bt1', name: 'DualSense Wireless Controller', connected: true, paired: true }, { id: 'bt2', name: 'Razer Kraken BT', connected: false, paired: true }];
+const btNearby = [{ id: 'bt3', name: 'Xbox Wireless Controller', connected: false, paired: false }, { id: 'bt4', name: 'JBL Flip 6', connected: false, paired: false }];
 let hidden = [];
 const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
@@ -181,6 +183,17 @@ export async function invoke(cmd, args) {
       return AUDIO.map(([id, name]) => ({ id, name, current: id === audioOut }));
     case 'set_audio_output':
       audioOut = args.id;
+      return;
+    case 'bluetooth_paired':
+      return btPaired.map((d) => ({ ...d }));
+    case 'bluetooth_scan':
+      await new Promise((r) => setTimeout(r, 1500));
+      return btNearby.filter((d) => !btPaired.some((p) => p.id === d.id));
+    case 'bluetooth_pair':
+      btPaired.push({ ...btNearby.find((d) => d.id === args.id), paired: true });
+      return;
+    case 'bluetooth_remove':
+      btPaired = btPaired.filter((d) => d.id !== args.id);
       return;
     case 'theme_file':
       throw new Error('no theme');

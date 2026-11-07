@@ -2,6 +2,7 @@
 
 mod art;
 mod audio;
+mod bluetooth;
 mod guide;
 mod launcher;
 mod local;
@@ -429,6 +430,28 @@ fn set_audio_output(id: String) -> Result<(), String> {
     audio::set_output(&id)
 }
 
+/// The Bluetooth devices paired with this PC.
+#[tauri::command(async)]
+fn bluetooth_paired() -> Result<Vec<bluetooth::BtDevice>, String> {
+    bluetooth::paired()
+}
+
+/// Looks for new Bluetooth devices in range (a radio inquiry, several seconds).
+#[tauri::command(async)]
+fn bluetooth_scan() -> Result<Vec<bluetooth::BtDevice>, String> {
+    bluetooth::scan()
+}
+
+#[tauri::command(async)]
+fn bluetooth_pair(id: String) -> Result<(), String> {
+    bluetooth::pair(&id)
+}
+
+#[tauri::command(async)]
+fn bluetooth_remove(id: String) -> Result<(), String> {
+    bluetooth::remove(&id)
+}
+
 #[tauri::command]
 fn power(action: String) {
     thread::spawn(move || {
@@ -551,6 +574,10 @@ fn main() {
             pad_batteries,
             audio_outputs,
             set_audio_output,
+            bluetooth_paired,
+            bluetooth_scan,
+            bluetooth_pair,
+            bluetooth_remove,
             power,
             exit_app
         ])
