@@ -104,15 +104,17 @@ const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music:
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
-let hidden = [];
-const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
+let btPaired = [{ id: 'bt1', name: 'DualSense Wireless Controller', connected: true, paired: true }, { id: 'bt2', name: 'Razer Kraken BT', connected: false, paired: true }];
+const btNearby = [{ id: 'bt3', name: 'Xbox Wireless Controller', connected: false, paired: false }, { id: 'bt4', name: 'JBL Flip 6', connected: false, paired: false }];
+let video = { mode: 'extend', displays: [{ id: '\\\\.\\DISPLAY1', name: 'DELL U2723QE', width: 3840, height: 2160, primary: true }, { id: '\\\\.\\DISPLAY2', name: 'LG TV', width: 1920, height: 1080, primary: false }] };
+let favorites = games.slice(0, 4).map((g) => g.id);
 
 export async function invoke(cmd, args) {
   switch (cmd) {
     case 'get_state':
-      return { games: visible(), stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\you\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
+      return { games: [...games], favorites: [...favorites], stats, settings: { ...settings }, theme: {}, themeDir: 'C:\\Users\\you\\AppData\\Roaming\\dev.lumen.launcher\\theme', running, user: 'Andrei', version: '0.1.0' };
     case 'scan_library':
-      setTimeout(() => emit('library', { games: visible(), warnings: [] }), 700);
+      setTimeout(() => emit('library', { games: [...games], warnings: [] }), 700);
       return;
     case 'launch_game':
       running = { id: args.id, started: false };
@@ -156,10 +158,15 @@ export async function invoke(cmd, args) {
     case 'remove_game': {
       const i = games.findIndex((g) => g.id === args.id);
       if (i < 0) return;
-      if (args.id.startsWith('manual:')) games.splice(i, 1);
-      else hidden.push({ id: args.id, name: games[i].name });
+      if (!args.id.startsWith('manual:')) throw new Error('Only games you added by hand can be removed.');
+      games.splice(i, 1);
+      favorites = favorites.filter((f) => f !== args.id);
       return;
     }
+    case 'set_favorite':
+      favorites = favorites.filter((f) => f !== args.id);
+      if (args.on) favorites.push(args.id);
+      return [...favorites];
     case 'uninstall_game': {
       const g = games.find((x) => x.id === args.id);
       if (!g) throw new Error('The game is no longer in the library.');
@@ -172,15 +179,29 @@ export async function invoke(cmd, args) {
       return [['steam', 'Steam'], ['epic', 'Epic Games Store'], ['gog', 'GOG Galaxy'], ['ea', 'EA app'], ['battlenet', 'Battle.net'], ['xbox', 'Xbox']].map(([id, name]) => ({ id, name, icon: id === 'gog' || id === 'ea' ? null : uri(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect x="6" y="6" width="52" height="52" rx="12" fill="#fff"/><text x="32" y="43" text-anchor="middle" font-size="32" font-weight="800" fill="#223">${name[0]}</text></svg>`) }));
     case 'open_platform':
       return;
-    case 'hidden_games':
-      return [...hidden];
-    case 'restore_game':
-      hidden = hidden.filter((h) => h.id !== args.id);
-      return;
     case 'audio_outputs':
       return AUDIO.map(([id, name]) => ({ id, name, current: id === audioOut }));
     case 'set_audio_output':
       audioOut = args.id;
+      return;
+    case 'video_state':
+      return JSON.parse(JSON.stringify(video));
+    case 'set_primary_display':
+      video.displays.forEach((d) => { d.primary = d.id === args.id; });
+      return;
+    case 'set_display_mode':
+      video.mode = args.mode;
+      return;
+    case 'bluetooth_paired':
+      return btPaired.map((d) => ({ ...d }));
+    case 'bluetooth_scan':
+      await new Promise((r) => setTimeout(r, 1500));
+      return btNearby.filter((d) => !btPaired.some((p) => p.id === d.id));
+    case 'bluetooth_pair':
+      btPaired.push({ ...btNearby.find((d) => d.id === args.id), paired: true });
+      return;
+    case 'bluetooth_remove':
+      btPaired = btPaired.filter((d) => d.id !== args.id);
       return;
     case 'theme_file':
       throw new Error('no theme');

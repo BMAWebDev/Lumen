@@ -2,6 +2,8 @@
 
 mod art;
 mod audio;
+mod bluetooth;
+mod display;
 mod guide;
 mod launcher;
 mod local;
@@ -25,7 +27,7 @@ use std::thread;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use model::{AppState, Game, HiddenGame, Inner, Running, Settings, Stat};
+use model::{AppState, Game, Inner, Running, Settings, Stat};
 
 const THEME_README_EN: &str = "Put files with these names here to customize Lumen:\r\n\
 \r\n\
@@ -54,6 +56,8 @@ struct Snapshot {
     theme: HashMap<String, String>,
     theme_dir: String,
     running: Option<Running>,
+    /// Ids of the games the user added to Favorites.
+    favorites: Vec<String>,
     user: String,
     version: String,
 }
@@ -132,6 +136,7 @@ fn get_state(state: State<'_, AppState>) -> Result<Snapshot, String> {
         theme: theme_files(&tdir),
         theme_dir: tdir.to_string_lossy().into_owned(),
         running: s.running.clone(),
+        favorites: store::load(&s.data_dir, "favorites.json"),
         user: std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_default(),
         version: env!("CARGO_PKG_VERSION").into(),
     })
@@ -182,8 +187,6 @@ fn scan_library(app: AppHandle) {
         let taken: Vec<String> = manual.iter().map(|g| util::norm_path(&g.install_dir)).collect();
         games.extend(local::scan(&folders).into_iter().filter(|g| !taken.contains(&util::norm_path(&g.install_dir))));
         games.extend(manual);
-        let hidden: Vec<HiddenGame> = store::load(&data_dir, "hidden.json");
-        games.retain(|g| !hidden.iter().any(|h| h.id == g.id));
         art::decorate(&mut games, &data_dir, online);
         games.sort_by_key(|g| g.name.to_lowercase());
         if let Ok(mut s) = state.inner.lock() {
@@ -316,29 +319,39 @@ fn add_game(app: AppHandle) -> Result<Option<String>, String> {
     Ok(Some(name))
 }
 
-/// Removes a game from the library.
+/// Removes a game the user added by hand (its files stay on disk). Games found on the PC cannot be removed,
+/// only added to or taken off Favorites.
 #[tauri::command]
 fn remove_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
     let mut s = state.inner.lock().map_err(lock_err)?;
     if s.running.as_ref().is_some_and(|r| r.id == id) {
         return Err(t!("Close the game before removing it.", "Închide jocul înainte să-l elimini.").into());
     }
-    let name = s.games.iter().find(|g| g.id == id).map(|g| g.name.clone()).ok_or(t!("The game is no longer in the library.", "Jocul nu mai există în bibliotecă."))?;
-    if local::is_manual(&id) {
-        // Manually added games disappear completely; the rest are only hidden, so the scan doesn't bring them back.
-        let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
-        manual.retain(|g| g.id != id);
-        store::save(&s.data_dir, "manual.json", &manual);
-    } else {
-        let mut hidden: Vec<HiddenGame> = store::load(&s.data_dir, "hidden.json");
-        if !hidden.iter().any(|h| h.id == id) {
-            hidden.push(HiddenGame { id: id.clone(), name });
-            store::save(&s.data_dir, "hidden.json", &hidden);
-        }
+    if !local::is_manual(&id) {
+        return Err(t!("Only games you added by hand can be removed.", "Pot fi eliminate doar jocurile adăugate manual.").into());
     }
+    let mut manual: Vec<Game> = store::load(&s.data_dir, "manual.json");
+    manual.retain(|g| g.id != id);
+    store::save(&s.data_dir, "manual.json", &manual);
+    let mut favorites: Vec<String> = store::load(&s.data_dir, "favorites.json");
+    favorites.retain(|f| f != &id);
+    store::save(&s.data_dir, "favorites.json", &favorites);
     s.games.retain(|g| g.id != id);
     store::save(&s.data_dir, "games.json", &s.games);
     Ok(())
+}
+
+/// Adds a game to Favorites or takes it off. Returns the new list of favorite ids.
+#[tauri::command]
+fn set_favorite(state: State<'_, AppState>, id: String, on: bool) -> Result<Vec<String>, String> {
+    let s = state.inner.lock().map_err(lock_err)?;
+    let mut favorites: Vec<String> = store::load(&s.data_dir, "favorites.json");
+    favorites.retain(|f| f != &id);
+    if on {
+        favorites.push(id);
+    }
+    store::save(&s.data_dir, "favorites.json", &favorites);
+    Ok(favorites)
 }
 
 /// Uninstalls a game. Xbox runs `Remove-AppxPackage` (a few seconds), so it stays off the main thread.
@@ -352,22 +365,6 @@ fn uninstall_game(state: State<'_, AppState>, id: String) -> Result<uninstall::O
         s.games.iter().find(|g| g.id == id).cloned().ok_or(t!("The game is no longer in the library.", "Jocul nu mai există în bibliotecă."))?
     };
     uninstall::run(&game)
-}
-
-#[tauri::command]
-fn hidden_games(state: State<'_, AppState>) -> Result<Vec<HiddenGame>, String> {
-    let s = state.inner.lock().map_err(lock_err)?;
-    Ok(store::load(&s.data_dir, "hidden.json"))
-}
-
-/// Brings a hidden game back to the library; it shows up on the next scan.
-#[tauri::command]
-fn restore_game(state: State<'_, AppState>, id: String) -> Result<(), String> {
-    let s = state.inner.lock().map_err(lock_err)?;
-    let mut hidden: Vec<HiddenGame> = store::load(&s.data_dir, "hidden.json");
-    hidden.retain(|h| h.id != id);
-    store::save(&s.data_dir, "hidden.json", &hidden);
-    Ok(())
 }
 
 #[tauri::command]
@@ -427,6 +424,56 @@ fn audio_outputs() -> Result<Vec<audio::AudioDevice>, String> {
 #[tauri::command(async)]
 fn set_audio_output(id: String) -> Result<(), String> {
     audio::set_output(&id)
+}
+
+/// The video outputs and whether the screens are extended or duplicated (PowerShell + C#, so off the main thread).
+#[tauri::command(async)]
+fn video_state() -> Result<display::VideoState, String> {
+    display::state()
+}
+
+/// Makes a display the main one and moves Lumen to it; games started afterwards open there too.
+#[tauri::command(async)]
+fn set_primary_display(app: AppHandle, id: String) -> Result<(), String> {
+    display::set_primary(&id)?;
+    // Windows needs a moment to settle the new layout before the window can be moved onto it.
+    std::thread::sleep(std::time::Duration::from_millis(900));
+    if let Some(w) = app.get_webview_window("main") {
+        if let Ok(Some(m)) = w.primary_monitor() {
+            let _ = w.set_fullscreen(false);
+            let _ = w.set_position(*m.position());
+            let _ = w.set_fullscreen(true);
+        }
+    }
+    Ok(())
+}
+
+/// Extends or duplicates the screens (`extend`, `clone`, `internal`, `external`).
+#[tauri::command(async)]
+fn set_display_mode(mode: String) -> Result<(), String> {
+    display::set_mode(&mode)
+}
+
+/// The Bluetooth devices paired with this PC.
+#[tauri::command(async)]
+fn bluetooth_paired() -> Result<Vec<bluetooth::BtDevice>, String> {
+    bluetooth::paired()
+}
+
+/// Looks for new Bluetooth devices in range (a radio inquiry, several seconds).
+#[tauri::command(async)]
+fn bluetooth_scan() -> Result<Vec<bluetooth::BtDevice>, String> {
+    bluetooth::scan()
+}
+
+#[tauri::command(async)]
+fn bluetooth_pair(id: String) -> Result<(), String> {
+    bluetooth::pair(&id)
+}
+
+#[tauri::command(async)]
+fn bluetooth_remove(id: String) -> Result<(), String> {
+    bluetooth::remove(&id)
 }
 
 #[tauri::command]
@@ -542,8 +589,7 @@ fn main() {
             add_game,
             remove_game,
             uninstall_game,
-            hidden_games,
-            restore_game,
+            set_favorite,
             open_path,
             theme_file,
             battery,
@@ -551,6 +597,13 @@ fn main() {
             pad_batteries,
             audio_outputs,
             set_audio_output,
+            video_state,
+            set_primary_display,
+            set_display_mode,
+            bluetooth_paired,
+            bluetooth_scan,
+            bluetooth_pair,
+            bluetooth_remove,
             power,
             exit_app
         ])

@@ -81,7 +81,8 @@ img { -webkit-user-drag: none; }
   opacity: 0; transition: opacity 400ms var(--ease);
 }
 body[data-view="library"] #bg::after,
-body[data-view="platforms"] #bg::after { opacity: 0.72; }
+body[data-view="platforms"] #bg::after,
+body[data-view="settings"] #bg::after { opacity: 0.72; }
 
 /* ---------------------------------------------------------------- Top bar */
 #topbar {
@@ -100,7 +101,10 @@ body[data-view="platforms"] #bg::after { opacity: 0.72; }
 .icon-btn {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;
   display: grid; place-items: center; color: var(--mist);
+  transition: color 200ms;
 }
+/* Like the active tab: the gear turns white while the Settings page is open. */
+body[data-view="settings"] #btn-settings { color: var(--ink); }
 .icon-btn svg { width: 2.6rem; height: 2.6rem; }
 .avatar {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;
@@ -347,6 +351,42 @@ body[data-zone="plat"] .gtile.focused .art::after { opacity: 1; }
 .switch.on { background: var(--azure); }
 .switch.on i { transform: translate3d(2.6rem, 0, 0); }
 .item.focused .switch:not(.on) { background: rgba(10, 16, 34, 0.25); }
+/* Radio: one choice among several */
+.radio {
+  flex: none; position: relative; width: 3.4rem; height: 3.4rem; border-radius: 50%;
+  border: 0.25rem solid rgba(255, 255, 255, 0.45); transition: border-color 180ms;
+}
+.radio i {
+  position: absolute; inset: 0.55rem; border-radius: 50%; background: var(--azure);
+  transform: scale(0); transition: transform 180ms var(--ease);
+}
+.radio.on { border-color: var(--azure); }
+.radio.on i { transform: scale(1); }
+.item.focused .radio:not(.on) { border-color: rgba(10, 16, 34, 0.4); }
+
+/* Settings page: categories on the left, the items of the selected one on the right */
+.set-wrap {
+  position: absolute; top: 10.5rem; left: var(--pad); right: var(--pad); bottom: 11rem;
+  display: grid; grid-template-columns: 36rem minmax(0, 1fr); gap: 6rem;
+}
+.set-cats { display: flex; flex-direction: column; gap: 0.8rem; padding-top: 1rem; }
+.set-cat {
+  display: flex; align-items: center; gap: 1.8rem; height: 7rem; padding: 0 2.6rem; border-radius: 1.4rem;
+  font-size: 2.2rem; color: var(--mist); text-align: left;
+  transition: background 140ms, color 140ms;
+}
+.set-cat svg { flex: none; width: 2.8rem; height: 2.8rem; }
+.set-cat.active { background: var(--chip); color: var(--ink); }
+.set-cat.focused { background: #fff; color: #0a1022; }
+.set-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; max-width: 100rem; }
+.set-main header h2 { margin: 0; font-size: 4.2rem; font-weight: 300; }
+.set-main header p { margin: 1rem 0 0; min-height: 2.4rem; color: var(--dim); font-size: 1.8rem; }
+.set-list {
+  list-style: none; margin: 2.4rem 0 0; padding: 0 0 4rem; flex: 1; min-height: 0;
+  overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none;
+}
+.set-list::-webkit-scrollbar { display: none; }
+.set-group { padding: 2.4rem 3rem 0.8rem; font-size: 1.6rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 
 /* Quick menu (the equivalent of the control center) */
 .quick {

@@ -15,7 +15,7 @@
 
   <header id="topbar">
     <nav class="tabs">
-      <button id="tab-home" class="tab active" data-i18n="tab.games">Games</button>
+      <button id="tab-home" class="tab active" data-i18n="tab.favorites">Favorites</button>
       <button id="tab-library" class="tab" data-i18n="tab.library">Library</button>
       <button id="tab-platforms" class="tab" data-i18n="tab.platforms">Platforms</button>
     </nav>
@@ -56,6 +56,16 @@
       </div>
       <div class="grid-wrap">
         <div id="plat-grid" class="grid"></div>
+      </div>
+    </section>
+
+    <section id="settings" class="view hidden">
+      <div class="set-wrap">
+        <nav id="set-cats" class="set-cats"></nav>
+        <div class="set-main">
+          <header><h2 id="set-title"></h2><p id="set-note"></p></header>
+          <ul id="set-list" class="set-list"></ul>
+        </div>
       </div>
     </section>
   </main>

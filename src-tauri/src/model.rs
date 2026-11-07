@@ -40,14 +40,6 @@ pub struct Stat {
     pub launches: u32,
 }
 
-/// A game removed from the library. It stays installed, but the scan skips it.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct HiddenGame {
-    pub id: String,
-    pub name: String,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {

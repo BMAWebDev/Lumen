@@ -105,9 +105,9 @@ function firstLoadable(list) {
 // ======================================================================
 // State
 // ======================================================================
-const ROW_MAX = 12;
 const S = {
   games: [],
+  favorites: [], // ids of the games shown on the Favorites tab
   stats: {},
   settings: {},
   theme: {},
@@ -132,21 +132,29 @@ const S = {
   platforms: [],
   platIndex: 0,
   platEls: [],
+  setCat: 0,
+  setIndex: 0,
+  setItems: [],
+  setEls: [],
   device: 'keyboard',
   pad: 'xbox',
   booting: true,
 };
-const VIEWS = ['home', 'library', 'platforms'];
+const VIEWS = ['home', 'library', 'platforms']; // the views with a tab; Settings is a page of its own, opened from the gear
+const ALL_VIEWS = [...VIEWS, 'settings'];
 const stack = []; // open overlays (quick menu, panels, launch screen)
 
 const stat = (id) => S.stats[id] || { playtimeSec: 0, lastPlayed: 0, launches: 0 };
 const gameById = (id) => S.games.find((g) => g.id === id);
 const curGame = () => S.row[S.rowIndex] || null;
 
-function recentGames() {
-  return [...S.games]
-    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, locale()))
-    .slice(0, ROW_MAX);
+const isFavorite = (id) => S.favorites.includes(id);
+
+/** The games on the Favorites tab, the most recently played first. */
+function favoriteGames() {
+  return S.games
+    .filter((g) => isFavorite(g.id))
+    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, locale()));
 }
 
 // ======================================================================
@@ -221,7 +229,7 @@ function tileArt(game) {
 }
 
 function renderRow(keepId) {
-  S.row = recentGames();
+  S.row = favoriteGames();
   rowTrack.textContent = '';
   S.rowEls = S.row.map((g, i) => {
     const tile = el('div', 'tile');
@@ -337,7 +345,7 @@ function renderDetail(force) {
         icon: isRunning && !S.running.started ? '' : icons.play,
         run: () => launch(g),
       });
-      S.actions.push({ label: '', aria: t('game.moreOptions'), cls: 'round', icon: icons.more, run: () => openGameOptions(g) });
+      S.actions.push({ label: '', aria: t('game.moreOptions'), cls: 'round', icon: icons.more, run: () => openGameOptions(g, 'favorites') });
 
       const st = stat(g.id);
       const facts = [
@@ -349,9 +357,16 @@ function renderDetail(force) {
       renderActions();
       detail.append(el('dl', 'facts', facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')));
     } else {
-      detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
-      detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
-      S.actions.push({ label: t('detail.refresh'), cls: 'primary', run: () => rescan(true) });
+      if (S.games.length) {
+        // There are games, but none was added to Favorites yet.
+        detail.append(el('h1', 'detail-title', esc(t('fav.emptyTitle'))));
+        detail.append(el('p', 'detail-text', esc(t('fav.emptyText'))));
+        S.actions.push({ label: t('fav.openLibrary'), cls: 'primary', run: () => showView('library') });
+      } else {
+        detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
+        detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
+        S.actions.push({ label: t('detail.refresh'), cls: 'primary', run: () => rescan(true) });
+      }
       renderActions();
     }
     S.actionIndex = clamp(S.actionIndex, 0, S.actions.length - 1);
@@ -556,18 +571,26 @@ function updateFocus() {
   else if (S.zone === 'filters') target = filtersEl.children[S.filterIndex];
   else if (S.zone === 'grid') target = S.libEls[S.libIndex];
   else if (S.zone === 'plat') target = S.platEls[S.platIndex];
+  else if (S.zone === 'scat') target = setCatsEl.children[S.setCat];
+  else if (S.zone === 'sitems') target = S.setEls[S.setIndex];
   target?.classList.add('focused');
+  if (S.zone === 'sitems') target?.scrollIntoView({ block: 'nearest' });
   updateHints();
 }
 
 function showView(view) {
   if (S.view === view) return;
   S.view = view;
-  for (const v of VIEWS) {
+  for (const v of ALL_VIEWS) {
     $(`#${v}`).classList.toggle('hidden', view !== v);
-    $(`#tab-${v}`).classList.toggle('active', view === v);
+    $(`#tab-${v}`)?.classList.toggle('active', view === v);
   }
-  if (view === 'library') {
+  if (view === 'settings') {
+    S.zone = 'scat';
+    S.tabIndex = 3;
+    S.setIndex = 0;
+    renderSettings();
+  } else if (view === 'library') {
     S.zone = S.libList.length ? 'grid' : 'filters';
     scrollGrid();
   } else if (view === 'platforms') {
@@ -600,7 +623,7 @@ function homeAction(a) {
       if (g) launch(g); else rescan(true);
     } else if (a === 'options') {
       const g = curGame();
-      if (g) { sound.play('confirm'); openGameOptions(g); }
+      if (g) { sound.play('confirm'); openGameOptions(g, 'favorites'); }
     } else if (a === 'back' && S.rowIndex !== 0) {
       S.rowIndex = 0; sound.play('back'); onRowFocus();
     }
@@ -613,7 +636,7 @@ function homeAction(a) {
     } else if (a === 'confirm') {
       sound.play('confirm'); S.actions[S.actionIndex]?.run();
     } else if (a === 'options') {
-      const g = curGame(); if (g) openGameOptions(g);
+      const g = curGame(); if (g) openGameOptions(g, 'favorites');
     }
   }
 }
@@ -630,7 +653,7 @@ function libraryAction(a) {
       if (S.libIndex < cols) { S.zone = 'filters'; sound.play('move'); updateFocus(); return; }
       ni = S.libIndex - cols;
     } else if (a === 'confirm') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); launch(g); } return; }
-    else if (a === 'options') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); openGameOptions(g); } return; }
+    else if (a === 'options') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); openGameOptions(g, 'library'); } return; }
     else if (a === 'back') { sound.play('back'); showView('home'); return; }
     if (ni !== S.libIndex) { S.libIndex = ni; sound.play('move'); updateFocus(); scrollGrid(); }
     else if (a === 'left' || a === 'right') bump(S.libEls[S.libIndex], a === 'left' ? -1 : 1);
@@ -698,6 +721,7 @@ function tabsAction(a) {
     else openSettings();
   } else if (a === 'down' || a === 'back') {
     S.zone = S.view === 'home' ? 'row'
+      : S.view === 'settings' ? 'scat'
       : S.view === 'platforms' ? (S.platforms.length ? 'plat' : 'tabs')
       : (S.libList.length ? 'grid' : 'filters');
     sound.play(a === 'back' ? 'back' : 'move');
@@ -711,14 +735,16 @@ function onAction(a) {
   if (top) { top.handle(a); updateHints(); return; }
   if (a === 'menu') { openQuick(); return; }
   if (a === 'prevTab' || a === 'nextTab') {
-    const v = VIEWS[clamp(VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, VIEWS.length - 1)];
+    // The shoulder buttons walk through the tabs and on to Settings, the page behind the gear.
+    const v = ALL_VIEWS[clamp(ALL_VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, ALL_VIEWS.length - 1)];
     if (v !== S.view) { sound.play('move'); showView(v); }
     return;
   }
-  if (a === 'first' || a === 'last') { jumpToEnd(a === 'last'); return; }
+  if (a === 'first' || a === 'last') { if (S.view !== 'settings') jumpToEnd(a === 'last'); return; }
   if (S.zone === 'tabs') tabsAction(a);
   else if (S.view === 'home') homeAction(a);
   else if (S.view === 'platforms') platformsAction(a);
+  else if (S.view === 'settings') settingsAction(a);
   else libraryAction(a);
 }
 
@@ -753,6 +779,13 @@ function closeAll() {
   while (stack.length && stack[stack.length - 1].type !== 'launch') closeTop(true);
 }
 
+/** The control at the end of an option: a switch for on/off settings (`toggle`), a radio for one choice among several (`radio`). */
+function control(it) {
+  if (it.toggle) return `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>`;
+  if (it.radio) return `<span class="radio ${it.radio() ? 'on' : ''}"><i></i></span>`;
+  return '';
+}
+
 /** Side panel with a vertical list of options. */
 function listPanel({ title, note, items }) {
   const panel = el('aside', 'panel');
@@ -768,7 +801,7 @@ function listPanel({ title, note, items }) {
     items.forEach((it, i) => {
       const li = el('li', 'item' + (it.danger ? ' danger' : ''));
       li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
-        (it.toggle ? `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>` : '');
+        control(it);
       li.addEventListener('click', () => { idx = i; focus(); activate(); });
       ul.appendChild(li);
     });
@@ -779,7 +812,7 @@ function listPanel({ title, note, items }) {
     if (!it) return;
     sound.play('confirm');
     await it.action?.();
-    if (it.toggle && panel.isConnected) render();
+    if ((it.toggle || it.radio) && panel.isConnected) render();
   };
   return {
     type: 'panel',
@@ -806,37 +839,165 @@ function confirmPanel(title, note, label, action) {
   }));
 }
 
-function openSettings() {
+const setCatsEl = $('#set-cats');
+const setListEl = $('#set-list');
+let setToken = 0;
+
+// Results of slow backend calls (PowerShell/COM), kept after the first load so menus open at once.
+// A cached value is returned immediately while a fresh one is fetched; `onChange` runs if it differs.
+const cacheStore = {};
+function cachedCall(key, cmd, onChange) {
+  const hit = cacheStore[key];
+  const fresh = call(cmd).then((v) => {
+    const changed = JSON.stringify(v) !== JSON.stringify(cacheStore[key]);
+    cacheStore[key] = v;
+    if (hit && changed) onChange?.();
+    return v;
+  });
+  if (!hit) return fresh;
+  fresh.catch(() => {}); // the stale value stays on screen if the refresh fails
+  return Promise.resolve(hit);
+}
+
+/** Redraws the open Settings category when background data for it changed. */
+const refreshCat = (id) => () => { if (S.view === 'settings' && settingsCats()[S.setCat]?.id === id) renderSettings(); };
+
+/** The settings, grouped in categories. Each `load` returns `{ items, note }` (it may be async). */
+function settingsCats() {
   const toggle = (key, label, desc) => ({
     label, desc,
     toggle: () => !!S.settings[key],
     action: () => setSetting(key, !S.settings[key]),
   });
   const langName = LANGUAGES.find((l) => l.code === getLang())?.name || '';
-  pushOverlay(listPanel({
-    title: t('settings.title'),
-    note: `Lumen ${S.version}`,
-    items: [
-      toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
-      toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
-      toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
-      toggle('sounds', t('settings.sounds')),
-      toggle('music', t('settings.music'), S.theme.music ? '' : t('settings.music.desc')),
-      toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
-      toggle('reduceMotion', t('settings.reduceMotion')),
-      { label: t('settings.language'), desc: langName, action: openLanguage },
-      { label: t('settings.audio'), desc: t('settings.audio.desc'), action: openAudioOutputs },
-      { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
-      {
-        label: t('settings.folders'),
-        desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
-        action: openGameFolders,
-      },
-      { label: t('settings.hidden'), desc: t('settings.hidden.desc'), action: openHiddenGames },
-      { label: t('settings.theme'), desc: t('settings.theme.desc'), action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
-      { label: t('detail.refresh'), action: () => { closeTop(true); rescan(true); } },
-    ],
-  }));
+  return [
+    {
+      id: 'general', label: t('set.general'), icon: icons.gear,
+      load: () => ({
+        note: `Lumen ${S.version}`,
+        items: [
+          { label: t('settings.language'), desc: langName, action: openLanguage },
+          toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
+          toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
+          toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
+        ],
+      }),
+    },
+    {
+      id: 'library', label: t('set.library'), icon: icons.library,
+      load: () => ({
+        items: [
+          { label: t('settings.addGame'), desc: t('settings.addGame.desc'), action: addGame },
+          {
+            label: t('settings.folders'),
+            desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
+            action: openGameFolders,
+          },
+          toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
+          { label: t('detail.refresh'), action: () => { closeAll(); rescan(true); } },
+        ],
+      }),
+    },
+    { id: 'audio', label: t('set.audio'), icon: icons.speaker, load: audioLoad },
+    { id: 'video', label: t('set.video'), icon: icons.monitor, load: videoLoad },
+    { id: 'bluetooth', label: t('bt.title'), icon: icons.bluetooth, load: bluetoothLoad },
+    {
+      id: 'appearance', label: t('set.appearance'), icon: icons.palette,
+      load: () => ({
+        items: [
+          toggle('reduceMotion', t('settings.reduceMotion')),
+          { label: t('settings.theme'), desc: t('settings.theme.desc'), action: () => call('open_path', { path: S.themeDir }).catch((e) => toast(String(e), 'error')) },
+        ],
+      }),
+    },
+  ];
+}
+
+/** Opens the Settings page, optionally on one category (`general`, `library`, `audio`, `bluetooth`, `appearance`). */
+function openSettings(catId) {
+  closeAll();
+  const idx = settingsCats().findIndex((c) => c.id === catId);
+  if (idx >= 0) S.setCat = idx;
+  if (S.view !== 'settings') { showView('settings'); return; }
+  S.zone = 'scat';
+  S.setIndex = 0;
+  renderSettings();
+  updateFocus();
+}
+
+/** Draws the category list and the items of the selected category. */
+async function renderSettings() {
+  const cats = settingsCats();
+  S.setCat = clamp(S.setCat, 0, cats.length - 1);
+  setCatsEl.textContent = '';
+  cats.forEach((c, i) => {
+    const b = el('button', 'set-cat' + (i === S.setCat ? ' active' : ''), `${c.icon}<span>${esc(c.label)}</span>`);
+    b.addEventListener('click', () => { if (stack.length) return; S.zone = 'scat'; selectCat(i); });
+    setCatsEl.appendChild(b);
+  });
+  $('#set-title').textContent = cats[S.setCat].label;
+  const me = ++setToken;
+  let r;
+  try { r = await cats[S.setCat].load(); } catch (e) { r = { items: [], note: String(e) }; }
+  if (me !== setToken) return; // another category was picked while this one loaded
+  S.setItems = r.items;
+  $('#set-note').textContent = r.note || '';
+  renderSettingsItems();
+}
+
+function renderSettingsItems() {
+  setListEl.textContent = '';
+  S.setEls = S.setItems.map((it, i) => {
+    if (it.group) setListEl.appendChild(el('li', 'set-group', esc(it.group)));
+    const li = el('li', 'item' + (it.danger ? ' danger' : ''));
+    li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
+      control(it);
+    li.addEventListener('click', () => {
+      if (stack.length) return;
+      S.zone = 'sitems'; S.setIndex = i; updateFocus(); activateSetting();
+    });
+    setListEl.appendChild(li);
+    return li;
+  });
+  S.setIndex = clamp(S.setIndex, 0, Math.max(0, S.setItems.length - 1));
+  if (S.zone === 'sitems' && !S.setItems.length) S.zone = 'scat';
+  updateFocus();
+}
+
+function selectCat(i) {
+  const n = settingsCats().length;
+  const ni = clamp(i, 0, n - 1);
+  if (ni === S.setCat) return;
+  S.setCat = ni;
+  S.setIndex = 0;
+  sound.play('move');
+  renderSettings();
+  updateFocus();
+}
+
+async function activateSetting() {
+  const it = S.setItems[S.setIndex];
+  if (!it) return;
+  sound.play('confirm');
+  const cat = S.setCat;
+  await it.action?.();
+  if ((it.toggle || it.radio) && S.view === 'settings' && cat === S.setCat) renderSettingsItems();
+}
+
+function settingsAction(a) {
+  if (S.zone === 'scat') {
+    if (a === 'up') { if (S.setCat === 0) goTabs(3); else selectCat(S.setCat - 1); }
+    else if (a === 'down') selectCat(S.setCat + 1);
+    else if (a === 'right' || a === 'confirm') {
+      if (S.setItems.length) { S.zone = 'sitems'; sound.play('move'); updateFocus(); }
+    } else if (a === 'back') { sound.play('back'); showView('home'); }
+    return;
+  }
+  if (a === 'up' || a === 'down') {
+    const ni = clamp(S.setIndex + (a === 'up' ? -1 : 1), 0, S.setItems.length - 1);
+    if (ni !== S.setIndex) { S.setIndex = ni; sound.play('move'); updateFocus(); }
+  } else if (a === 'confirm') activateSetting();
+  else if (a === 'left' || a === 'back') { S.zone = 'scat'; sound.play('back'); updateFocus(); }
 }
 
 /** Language picker. The choice is saved by the backend, which also uses it for its own messages. */
@@ -846,7 +1007,7 @@ function openLanguage() {
     note: t('language.note'),
     items: LANGUAGES.map((l) => ({
       label: l.name,
-      toggle: () => getLang() === l.code,
+      radio: () => getLang() === l.code,
       action: () => setLanguage(l.code),
     })),
   }));
@@ -860,7 +1021,6 @@ async function setLanguage(code) {
     closeAll();
     refreshLanguage();
     toast(t('language.changed'));
-    openSettings();
   } catch (e) {
     toast(String(e), 'error');
   }
@@ -877,6 +1037,7 @@ function refreshLanguage() {
   renderRow(curGame()?.id);
   renderLibrary(S.libList[S.libIndex]?.id);
   renderPlatforms();
+  if (S.view === 'settings') renderSettings();
   updateRunning();
   updateHints();
 }
@@ -894,16 +1055,15 @@ async function addGame() {
   }
 }
 
-// Games added manually are deleted for good; the others are only hidden and can be brought back from Settings.
+// Games the user added by hand can be removed from Lumen (their files stay on disk).
 function removeGame(g) {
-  const manual = g.id.startsWith('manual:');
-  const note = manual ? t('remove.noteManual') : t('remove.noteOther');
-  confirmPanel(t('remove.title', { name: g.name }), note, t('remove.confirm'), async () => {
+  confirmPanel(t('remove.title', { name: g.name }), t('remove.noteManual'), t('remove.confirm'), async () => {
     try {
       await call('remove_game', { id: g.id });
       closeAll();
       // Remove the game right away, without a full scan.
       S.games = S.games.filter((x) => x.id !== g.id);
+      S.favorites = S.favorites.filter((id) => id !== g.id);
       renderRow();
       renderLibrary();
       toast(t('remove.done', { name: g.name }));
@@ -913,26 +1073,155 @@ function removeGame(g) {
   });
 }
 
-// Changes the Windows default audio device, so it applies to games too.
-async function openAudioOutputs() {
+/** Adds a game to Favorites (from the Library) or takes it off (from the Favorites tab). */
+async function setFavorite(g, on) {
+  try {
+    S.favorites = (await call('set_favorite', { id: g.id, on })) || [];
+    closeAll();
+    renderRow();
+    renderLibrary(g.id);
+    toast(t(on ? 'fav.added' : 'fav.removed', { name: g.name }));
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+}
+
+// The audio category: sounds and music, plus the Windows default output device (it applies to games too).
+async function audioLoad() {
+  const toggle = (key, label, desc) => ({ label, desc, toggle: () => !!S.settings[key], action: () => setSetting(key, !S.settings[key]) });
+  const items = [
+    toggle('sounds', t('settings.sounds')),
+    toggle('music', t('settings.music'), S.theme.music ? '' : t('settings.music.desc')),
+  ];
   let devices = [];
-  try { devices = (await call('audio_outputs')) || []; } catch (e) { toast(String(e), 'error'); return; }
-  pushOverlay(listPanel({
-    title: t('audio.title'),
-    note: devices.length ? t('audio.note') : t('audio.none'),
-    items: devices.map((d) => ({
-      label: d.name,
-      toggle: () => d.current,
-      action: async () => {
-        if (d.current) return;
-        try {
-          await call('set_audio_output', { id: d.id });
-          devices.forEach((x) => { x.current = x.id === d.id; });
-          toast(t('audio.done', { name: d.name }));
-        } catch (e) { toast(String(e), 'error'); }
-      },
-    })),
+  let note = t('audio.note');
+  try { devices = (await cachedCall('audio', 'audio_outputs', refreshCat('audio'))) || []; } catch (e) { note = String(e); }
+  if (!devices.length && note === t('audio.note')) note = t('audio.none');
+  devices.forEach((d, i) => items.push({
+    group: i === 0 ? t('audio.title') : '',
+    label: d.name,
+    radio: () => d.current,
+    action: async () => {
+      if (d.current) return;
+      try {
+        await call('set_audio_output', { id: d.id });
+        devices.forEach((x) => { x.current = x.id === d.id; });
+        toast(t('audio.done', { name: d.name }));
+      } catch (e) { toast(String(e), 'error'); }
+    },
   }));
+  return { items, note };
+}
+
+// The video category: which screen is the main one (Lumen and the games open there) and, with several
+// screens, whether they are extended or duplicated.
+async function videoLoad() {
+  let st;
+  try { st = await cachedCall('video', 'video_state', refreshCat('video')); } catch (e) { return { items: [], note: String(e) }; }
+  const items = [];
+  // A duplicated pair of screens shows up as one display, so the mode choice also appears for `clone`.
+  if (st.displays.length > 1 || st.mode === 'clone' || st.mode === 'external') {
+    [['extend', 'video.extend'], ['clone', 'video.clone']].forEach(([mode, key], i) => items.push({
+      group: i === 0 ? t('video.mode') : '',
+      label: t(key),
+      desc: t(`${key}.desc`),
+      radio: () => st.mode === mode,
+      action: () => { if (st.mode !== mode) return changeDisplayMode(mode); },
+    }));
+  }
+  st.displays.forEach((d, i) => items.push({
+    group: i === 0 ? t('video.main') : '',
+    label: d.name,
+    desc: `${d.width} × ${d.height}`,
+    radio: () => d.primary,
+    action: () => { if (!d.primary) return setMainDisplay(d); },
+  }));
+  return { items, note: items.length ? t('video.note') : t('video.none') };
+}
+
+/** Reloads the video category with fresh data after the screens changed. */
+function reloadVideo() {
+  delete cacheStore.video;
+  if (S.view === 'settings') renderSettings();
+}
+
+async function setMainDisplay(d) {
+  toast(t('video.applying'));
+  try {
+    await call('set_primary_display', { id: d.id });
+    toast(t('video.mainDone', { name: d.name }));
+  } catch (e) { toast(String(e), 'error'); }
+  reloadVideo();
+}
+
+async function changeDisplayMode(mode) {
+  toast(t('video.applying'));
+  try {
+    await call('set_display_mode', { mode });
+    await new Promise((r) => setTimeout(r, 2500)); // Windows takes a moment to switch
+    toast(t(`video.${mode}.done`));
+  } catch (e) { toast(String(e), 'error'); }
+  reloadVideo();
+}
+
+// Bluetooth: paired devices, adding a new one (pairing) and removing one (unpairing).
+async function bluetoothLoad() {
+  let devices = [];
+  try { devices = (await cachedCall('bluetooth', 'bluetooth_paired', refreshCat('bluetooth'))) || []; } catch (e) { return { items: [], note: String(e) }; }
+  const items = devices.map((d) => ({
+    label: d.name,
+    desc: d.connected ? t('bt.connected') : t('bt.paired'),
+    action: () => confirmPanel(d.name, t('bt.removeNote'), t('bt.remove'), () => removeBluetooth(d)),
+  }));
+  items.push({ label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+  return { items, note: devices.length ? t('bt.note') : t('bt.none') };
+}
+
+/** Closes the open panels and reloads the Bluetooth list. */
+function reloadBluetooth() {
+  closeAll();
+  if (S.view === 'settings') renderSettings();
+}
+
+async function removeBluetooth(d) {
+  try {
+    await call('bluetooth_remove', { id: d.id });
+    if (cacheStore.bluetooth) cacheStore.bluetooth = cacheStore.bluetooth.filter((x) => x.id !== d.id);
+    toast(t('bt.removed', { name: d.name }));
+  } catch (e) { toast(String(e), 'error'); }
+  reloadBluetooth();
+}
+
+let btBusy = false;
+async function scanBluetooth() {
+  if (btBusy) return;
+  btBusy = true;
+  // The inquiry takes a while: a panel with only "Cancel" stays up, and the results replace it.
+  let cancelled = false;
+  const wait = listPanel({
+    title: t('bt.scanning'), note: t('bt.scanning.note'),
+    items: [{ label: t('common.cancel'), action: () => { cancelled = true; closeTop(); } }],
+  });
+  pushOverlay(wait);
+  let found = [];
+  try { found = (await call('bluetooth_scan')) || []; } catch (e) { if (!cancelled) toast(String(e), 'error'); }
+  btBusy = false;
+  if (cancelled) return;
+  if (stack[stack.length - 1] !== wait) return;
+  closeTop(true);
+  const items = found.map((d) => ({ label: d.name, action: () => pairBluetooth(d) }));
+  items.push({ label: t('bt.rescan'), action: () => { closeTop(true); scanBluetooth(); } });
+  pushOverlay(listPanel({ title: t('bt.add'), note: found.length ? t('bt.found.note') : t('bt.found.none'), items }), true);
+}
+
+async function pairBluetooth(d) {
+  toast(t('bt.pairing', { name: d.name }));
+  try {
+    await call('bluetooth_pair', { id: d.id });
+    delete cacheStore.bluetooth; // the new device shows up with its real state
+    toast(t('bt.pairDone', { name: d.name }));
+    reloadBluetooth();
+  } catch (e) { toast(String(e), 'error'); }
 }
 
 // Steam and games with an uninstaller ask for confirmation in their own window; Xbox games are uninstalled directly.
@@ -956,30 +1245,9 @@ function uninstallGame(g) {
   confirmPanel(t('uninstall.title', { name: g.name }), t('uninstall.note'), t('uninstall.confirm'), run);
 }
 
-async function openHiddenGames() {
-  let hidden = [];
-  try { hidden = (await call('hidden_games')) || []; } catch (e) { toast(String(e), 'error'); return; }
-  pushOverlay(listPanel({
-    title: t('hidden.title'),
-    note: hidden.length ? t('hidden.note') : t('hidden.none'),
-    items: hidden.map((h) => ({
-      label: h.name,
-      desc: t('hidden.restore'),
-      action: async () => {
-        try {
-          await call('restore_game', { id: h.id });
-          closeAll();
-          toast(t('hidden.done', { name: h.name }));
-          rescan(false);
-        } catch (e) { toast(String(e), 'error'); }
-      },
-    })),
-  }));
-}
-
 // Each subfolder of a folder listed here shows up in the library as a "Local" game.
 function openGameFolders() {
-  const reopen = () => { closeAll(); openSettings(); openGameFolders(); };
+  const reopen = () => { closeAll(); renderSettings(); openGameFolders(); };
   const folders = S.settings.gameFolders || [];
   pushOverlay(listPanel({
     title: t('folders.title'),
@@ -1028,17 +1296,20 @@ function applySettings() {
   sound.musicPlay(!!S.settings.music && !S.running?.started && !document.hidden);
 }
 
-function openGameOptions(g) {
+/** The options of a game. `from` is where they were opened: the Favorites tab or the Library. */
+function openGameOptions(g, from) {
   const running = S.running?.id === g.id;
   const items = [
     ...(running && S.running.started ? [{ label: t('game.back'), action: () => resumeGame() }] : []),
     running
       ? { label: t('opt.close'), danger: true, action: () => { closeTop(true); askCloseGame(); } }
       : { label: t('game.play'), action: () => { closeTop(true); launch(g); } },
+    ...(from === 'favorites' ? [{ label: t('fav.remove'), action: () => setFavorite(g, false) }] : []),
+    ...(from === 'library' && !isFavorite(g.id) ? [{ label: t('fav.add'), action: () => setFavorite(g, true) }] : []),
     { label: t('opt.openLocation'), desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
   ];
   if (!running) items.push({ label: t('opt.uninstall'), danger: true, action: () => uninstallGame(g) });
-  if (!running) items.push({ label: t('remove.confirm'), danger: true, action: () => removeGame(g) });
+  if (!running && g.id.startsWith('manual:')) items.push({ label: t('remove.confirm'), danger: true, action: () => removeGame(g) });
   // The running game can be closed from the options of any game in the library.
   const other = !running && gameById(S.running?.id);
   if (other) items.unshift({ label: t('opt.closeNamed', { name: other.name }), desc: t('opt.runningNow'), danger: true, action: () => { closeTop(true); askCloseGame(); } });
@@ -1234,6 +1505,8 @@ function updateHints() {
   if (top?.type === 'launch') list = S.running?.started ? [['menu', 'hint.menu']] : [['back', 'hint.cancel'], ['menu', 'hint.menu']];
   else if (top) list = [['confirm', 'hint.select'], ['back', 'hint.back']];
   else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['menu', 'hint.menu']];
+  else if (S.view === 'settings' && S.zone === 'scat') list = [['confirm', 'hint.select'], ['back', 'hint.back'], ['menu', 'hint.menu']];
+  else if (S.view === 'settings' && S.zone === 'sitems') list = [['confirm', 'hint.select'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else if (S.view === 'platforms' && S.zone === 'plat') list = [['confirm', 'hint.open'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else if (S.view === 'library' && S.zone === 'grid') list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['back', 'hint.back'], ['menu', 'hint.menu']];
   else list = [['confirm', 'hint.select'], ['menu', 'hint.menu']];
@@ -1369,6 +1642,7 @@ async function boot() {
   const snap = await call('get_state');
   Object.assign(S, {
     games: snap.games || [],
+    favorites: snap.favorites || [],
     stats: snap.stats || {},
     settings: snap.settings || {},
     theme: snap.theme || {},
@@ -1432,6 +1706,10 @@ async function boot() {
   document.body.classList.remove('booting');
   updateHints();
   rescan(false);
+  // Warm the slow menus once Lumen is up, so they open instantly later (staggered to keep the start light).
+  setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); loadPlatforms(); }, 1500);
+  setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
+  setTimeout(() => cachedCall('video', 'video_state').catch(() => {}), 5500);
 }
 
 boot();
