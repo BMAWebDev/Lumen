@@ -769,6 +769,13 @@ function closeAll() {
   while (stack.length && stack[stack.length - 1].type !== 'launch') closeTop(true);
 }
 
+/** The control at the end of an option: a switch for on/off settings (`toggle`), a radio for one choice among several (`radio`). */
+function control(it) {
+  if (it.toggle) return `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>`;
+  if (it.radio) return `<span class="radio ${it.radio() ? 'on' : ''}"><i></i></span>`;
+  return '';
+}
+
 /** Side panel with a vertical list of options. */
 function listPanel({ title, note, items }) {
   const panel = el('aside', 'panel');
@@ -784,7 +791,7 @@ function listPanel({ title, note, items }) {
     items.forEach((it, i) => {
       const li = el('li', 'item' + (it.danger ? ' danger' : ''));
       li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
-        (it.toggle ? `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>` : '');
+        control(it);
       li.addEventListener('click', () => { idx = i; focus(); activate(); });
       ul.appendChild(li);
     });
@@ -795,7 +802,7 @@ function listPanel({ title, note, items }) {
     if (!it) return;
     sound.play('confirm');
     await it.action?.();
-    if (it.toggle && panel.isConnected) render();
+    if ((it.toggle || it.radio) && panel.isConnected) render();
   };
   return {
     type: 'panel',
@@ -934,7 +941,7 @@ function renderSettingsItems() {
     if (it.group) setListEl.appendChild(el('li', 'set-group', esc(it.group)));
     const li = el('li', 'item' + (it.danger ? ' danger' : ''));
     li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
-      (it.toggle ? `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>` : '');
+      control(it);
     li.addEventListener('click', () => {
       if (stack.length) return;
       S.zone = 'sitems'; S.setIndex = i; updateFocus(); activateSetting();
@@ -964,7 +971,7 @@ async function activateSetting() {
   sound.play('confirm');
   const cat = S.setCat;
   await it.action?.();
-  if (it.toggle && S.view === 'settings' && cat === S.setCat) renderSettingsItems();
+  if ((it.toggle || it.radio) && S.view === 'settings' && cat === S.setCat) renderSettingsItems();
 }
 
 function settingsAction(a) {
@@ -990,7 +997,7 @@ function openLanguage() {
     note: t('language.note'),
     items: LANGUAGES.map((l) => ({
       label: l.name,
-      toggle: () => getLang() === l.code,
+      radio: () => getLang() === l.code,
       action: () => setLanguage(l.code),
     })),
   }));
@@ -1071,7 +1078,7 @@ async function audioLoad() {
   devices.forEach((d, i) => items.push({
     group: i === 0 ? t('audio.title') : '',
     label: d.name,
-    toggle: () => d.current,
+    radio: () => d.current,
     action: async () => {
       if (d.current) return;
       try {

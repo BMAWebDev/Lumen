@@ -348,6 +348,18 @@ body[data-zone="plat"] .gtile.focused .art::after { opacity: 1; }
 .switch.on { background: var(--azure); }
 .switch.on i { transform: translate3d(2.6rem, 0, 0); }
 .item.focused .switch:not(.on) { background: rgba(10, 16, 34, 0.25); }
+/* Radio: one choice among several */
+.radio {
+  flex: none; position: relative; width: 3.4rem; height: 3.4rem; border-radius: 50%;
+  border: 0.25rem solid rgba(255, 255, 255, 0.45); transition: border-color 180ms;
+}
+.radio i {
+  position: absolute; inset: 0.55rem; border-radius: 50%; background: var(--azure);
+  transform: scale(0); transition: transform 180ms var(--ease);
+}
+.radio.on { border-color: var(--azure); }
+.radio.on i { transform: scale(1); }
+.item.focused .radio:not(.on) { border-color: rgba(10, 16, 34, 0.4); }
 
 /* Settings page: categories on the left, the items of the selected one on the right */
 .set-wrap {
