@@ -890,6 +890,7 @@ function settingsCats() {
       }),
     },
     { id: 'audio', label: t('set.audio'), icon: icons.speaker, load: audioLoad },
+    { id: 'video', label: t('set.video'), icon: icons.monitor, load: videoLoad },
     { id: 'bluetooth', label: t('bt.title'), icon: icons.bluetooth, load: bluetoothLoad },
     {
       id: 'appearance', label: t('set.appearance'), icon: icons.palette,
@@ -1089,6 +1090,57 @@ async function audioLoad() {
     },
   }));
   return { items, note };
+}
+
+// The video category: which screen is the main one (Lumen and the games open there) and, with several
+// screens, whether they are extended or duplicated.
+async function videoLoad() {
+  let st;
+  try { st = await cachedCall('video', 'video_state', refreshCat('video')); } catch (e) { return { items: [], note: String(e) }; }
+  const items = [];
+  // A duplicated pair of screens shows up as one display, so the mode choice also appears for `clone`.
+  if (st.displays.length > 1 || st.mode === 'clone' || st.mode === 'external') {
+    [['extend', 'video.extend'], ['clone', 'video.clone']].forEach(([mode, key], i) => items.push({
+      group: i === 0 ? t('video.mode') : '',
+      label: t(key),
+      desc: t(`${key}.desc`),
+      radio: () => st.mode === mode,
+      action: () => { if (st.mode !== mode) return changeDisplayMode(mode); },
+    }));
+  }
+  st.displays.forEach((d, i) => items.push({
+    group: i === 0 ? t('video.main') : '',
+    label: d.name,
+    desc: `${d.width} × ${d.height}`,
+    radio: () => d.primary,
+    action: () => { if (!d.primary) return setMainDisplay(d); },
+  }));
+  return { items, note: items.length ? t('video.note') : t('video.none') };
+}
+
+/** Reloads the video category with fresh data after the screens changed. */
+function reloadVideo() {
+  delete cacheStore.video;
+  if (S.view === 'settings') renderSettings();
+}
+
+async function setMainDisplay(d) {
+  toast(t('video.applying'));
+  try {
+    await call('set_primary_display', { id: d.id });
+    toast(t('video.mainDone', { name: d.name }));
+  } catch (e) { toast(String(e), 'error'); }
+  reloadVideo();
+}
+
+async function changeDisplayMode(mode) {
+  toast(t('video.applying'));
+  try {
+    await call('set_display_mode', { mode });
+    await new Promise((r) => setTimeout(r, 2500)); // Windows takes a moment to switch
+    toast(t(`video.${mode}.done`));
+  } catch (e) { toast(String(e), 'error'); }
+  reloadVideo();
 }
 
 // Bluetooth: paired devices, adding a new one (pairing) and removing one (unpairing).
@@ -1653,6 +1705,7 @@ async function boot() {
   // Warm the slow menus once Lumen is up, so they open instantly later (staggered to keep the start light).
   setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); loadPlatforms(); }, 1500);
   setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
+  setTimeout(() => cachedCall('video', 'video_state').catch(() => {}), 5500);
 }
 
 boot();

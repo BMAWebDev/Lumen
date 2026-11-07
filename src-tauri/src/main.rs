@@ -3,6 +3,7 @@
 mod art;
 mod audio;
 mod bluetooth;
+mod display;
 mod guide;
 mod launcher;
 mod local;
@@ -430,6 +431,34 @@ fn set_audio_output(id: String) -> Result<(), String> {
     audio::set_output(&id)
 }
 
+/// The video outputs and whether the screens are extended or duplicated (PowerShell + C#, so off the main thread).
+#[tauri::command(async)]
+fn video_state() -> Result<display::VideoState, String> {
+    display::state()
+}
+
+/// Makes a display the main one and moves Lumen to it; games started afterwards open there too.
+#[tauri::command(async)]
+fn set_primary_display(app: AppHandle, id: String) -> Result<(), String> {
+    display::set_primary(&id)?;
+    // Windows needs a moment to settle the new layout before the window can be moved onto it.
+    std::thread::sleep(std::time::Duration::from_millis(900));
+    if let Some(w) = app.get_webview_window("main") {
+        if let Ok(Some(m)) = w.primary_monitor() {
+            let _ = w.set_fullscreen(false);
+            let _ = w.set_position(*m.position());
+            let _ = w.set_fullscreen(true);
+        }
+    }
+    Ok(())
+}
+
+/// Extends or duplicates the screens (`extend`, `clone`, `internal`, `external`).
+#[tauri::command(async)]
+fn set_display_mode(mode: String) -> Result<(), String> {
+    display::set_mode(&mode)
+}
+
 /// The Bluetooth devices paired with this PC.
 #[tauri::command(async)]
 fn bluetooth_paired() -> Result<Vec<bluetooth::BtDevice>, String> {
@@ -574,6 +603,9 @@ fn main() {
             pad_batteries,
             audio_outputs,
             set_audio_output,
+            video_state,
+            set_primary_display,
+            set_display_mode,
             bluetooth_paired,
             bluetooth_scan,
             bluetooth_pair,

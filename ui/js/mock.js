@@ -106,6 +106,7 @@ let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
 let btPaired = [{ id: 'bt1', name: 'DualSense Wireless Controller', connected: true, paired: true }, { id: 'bt2', name: 'Razer Kraken BT', connected: false, paired: true }];
 const btNearby = [{ id: 'bt3', name: 'Xbox Wireless Controller', connected: false, paired: false }, { id: 'bt4', name: 'JBL Flip 6', connected: false, paired: false }];
+let video = { mode: 'extend', displays: [{ id: '\\\\.\\DISPLAY1', name: 'DELL U2723QE', width: 3840, height: 2160, primary: true }, { id: '\\\\.\\DISPLAY2', name: 'LG TV', width: 1920, height: 1080, primary: false }] };
 let hidden = [];
 const visible = () => games.filter((g) => !hidden.some((h) => h.id === g.id));
 
@@ -183,6 +184,14 @@ export async function invoke(cmd, args) {
       return AUDIO.map(([id, name]) => ({ id, name, current: id === audioOut }));
     case 'set_audio_output':
       audioOut = args.id;
+      return;
+    case 'video_state':
+      return JSON.parse(JSON.stringify(video));
+    case 'set_primary_display':
+      video.displays.forEach((d) => { d.primary = d.id === args.id; });
+      return;
+    case 'set_display_mode':
+      video.mode = args.mode;
       return;
     case 'bluetooth_paired':
       return btPaired.map((d) => ({ ...d }));
