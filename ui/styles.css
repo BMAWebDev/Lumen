@@ -101,7 +101,10 @@ body[data-view="settings"] #bg::after { opacity: 0.72; }
 .icon-btn {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;
   display: grid; place-items: center; color: var(--mist);
+  transition: color 200ms;
 }
+/* Like the active tab: the gear turns white while the Settings page is open. */
+body[data-view="settings"] #btn-settings { color: var(--ink); }
 .icon-btn svg { width: 2.6rem; height: 2.6rem; }
 .avatar {
   width: 4.4rem; height: 4.4rem; border-radius: 50%;

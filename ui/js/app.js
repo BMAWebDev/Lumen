@@ -725,8 +725,8 @@ function onAction(a) {
   if (top) { top.handle(a); updateHints(); return; }
   if (a === 'menu') { openQuick(); return; }
   if (a === 'prevTab' || a === 'nextTab') {
-    if (S.view === 'settings') { if (S.zone !== 'tabs') selectCat(S.setCat + (a === 'prevTab' ? -1 : 1)); return; }
-    const v = VIEWS[clamp(VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, VIEWS.length - 1)];
+    // The shoulder buttons walk through the tabs and on to Settings, the page behind the gear.
+    const v = ALL_VIEWS[clamp(ALL_VIEWS.indexOf(S.view) + (a === 'prevTab' ? -1 : 1), 0, ALL_VIEWS.length - 1)];
     if (v !== S.view) { sound.play('move'); showView(v); }
     return;
   }
