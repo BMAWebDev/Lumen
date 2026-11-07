@@ -105,9 +105,9 @@ function firstLoadable(list) {
 // ======================================================================
 // State
 // ======================================================================
-const ROW_MAX = 12;
 const S = {
   games: [],
+  favorites: [], // ids of the games shown on the Favorites tab
   stats: {},
   settings: {},
   theme: {},
@@ -148,10 +148,13 @@ const stat = (id) => S.stats[id] || { playtimeSec: 0, lastPlayed: 0, launches: 0
 const gameById = (id) => S.games.find((g) => g.id === id);
 const curGame = () => S.row[S.rowIndex] || null;
 
-function recentGames() {
-  return [...S.games]
-    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, locale()))
-    .slice(0, ROW_MAX);
+const isFavorite = (id) => S.favorites.includes(id);
+
+/** The games on the Favorites tab, the most recently played first. */
+function favoriteGames() {
+  return S.games
+    .filter((g) => isFavorite(g.id))
+    .sort((a, b) => (stat(b.id).lastPlayed - stat(a.id).lastPlayed) || a.name.localeCompare(b.name, locale()));
 }
 
 // ======================================================================
@@ -226,7 +229,7 @@ function tileArt(game) {
 }
 
 function renderRow(keepId) {
-  S.row = recentGames();
+  S.row = favoriteGames();
   rowTrack.textContent = '';
   S.rowEls = S.row.map((g, i) => {
     const tile = el('div', 'tile');
@@ -342,7 +345,7 @@ function renderDetail(force) {
         icon: isRunning && !S.running.started ? '' : icons.play,
         run: () => launch(g),
       });
-      S.actions.push({ label: '', aria: t('game.moreOptions'), cls: 'round', icon: icons.more, run: () => openGameOptions(g) });
+      S.actions.push({ label: '', aria: t('game.moreOptions'), cls: 'round', icon: icons.more, run: () => openGameOptions(g, 'favorites') });
 
       const st = stat(g.id);
       const facts = [
@@ -354,9 +357,16 @@ function renderDetail(force) {
       renderActions();
       detail.append(el('dl', 'facts', facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${v}</dd></div>`).join('')));
     } else {
-      detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
-      detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
-      S.actions.push({ label: t('detail.refresh'), cls: 'primary', run: () => rescan(true) });
+      if (S.games.length) {
+        // There are games, but none was added to Favorites yet.
+        detail.append(el('h1', 'detail-title', esc(t('fav.emptyTitle'))));
+        detail.append(el('p', 'detail-text', esc(t('fav.emptyText'))));
+        S.actions.push({ label: t('fav.openLibrary'), cls: 'primary', run: () => showView('library') });
+      } else {
+        detail.append(el('h1', 'detail-title', esc(t('detail.emptyTitle'))));
+        detail.append(el('p', 'detail-text', esc(t('detail.emptyText'))));
+        S.actions.push({ label: t('detail.refresh'), cls: 'primary', run: () => rescan(true) });
+      }
       renderActions();
     }
     S.actionIndex = clamp(S.actionIndex, 0, S.actions.length - 1);
@@ -613,7 +623,7 @@ function homeAction(a) {
       if (g) launch(g); else rescan(true);
     } else if (a === 'options') {
       const g = curGame();
-      if (g) { sound.play('confirm'); openGameOptions(g); }
+      if (g) { sound.play('confirm'); openGameOptions(g, 'favorites'); }
     } else if (a === 'back' && S.rowIndex !== 0) {
       S.rowIndex = 0; sound.play('back'); onRowFocus();
     }
@@ -626,7 +636,7 @@ function homeAction(a) {
     } else if (a === 'confirm') {
       sound.play('confirm'); S.actions[S.actionIndex]?.run();
     } else if (a === 'options') {
-      const g = curGame(); if (g) openGameOptions(g);
+      const g = curGame(); if (g) openGameOptions(g, 'favorites');
     }
   }
 }
@@ -643,7 +653,7 @@ function libraryAction(a) {
       if (S.libIndex < cols) { S.zone = 'filters'; sound.play('move'); updateFocus(); return; }
       ni = S.libIndex - cols;
     } else if (a === 'confirm') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); launch(g); } return; }
-    else if (a === 'options') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); openGameOptions(g); } return; }
+    else if (a === 'options') { const g = S.libList[S.libIndex]; if (g) { sound.play('confirm'); openGameOptions(g, 'library'); } return; }
     else if (a === 'back') { sound.play('back'); showView('home'); return; }
     if (ni !== S.libIndex) { S.libIndex = ni; sound.play('move'); updateFocus(); scrollGrid(); }
     else if (a === 'left' || a === 'right') bump(S.libEls[S.libIndex], a === 'left' ? -1 : 1);
@@ -883,7 +893,6 @@ function settingsCats() {
             desc: S.settings.gameFolders?.length ? S.settings.gameFolders.join(', ') : t('settings.folders.desc'),
             action: openGameFolders,
           },
-          { label: t('settings.hidden'), desc: t('settings.hidden.desc'), action: openHiddenGames },
           toggle('onlineArt', t('settings.onlineArt'), t('settings.onlineArt.desc')),
           { label: t('detail.refresh'), action: () => { closeAll(); rescan(true); } },
         ],
@@ -1046,16 +1055,15 @@ async function addGame() {
   }
 }
 
-// Games added manually are deleted for good; the others are only hidden and can be brought back from Settings.
+// Games the user added by hand can be removed from Lumen (their files stay on disk).
 function removeGame(g) {
-  const manual = g.id.startsWith('manual:');
-  const note = manual ? t('remove.noteManual') : t('remove.noteOther');
-  confirmPanel(t('remove.title', { name: g.name }), note, t('remove.confirm'), async () => {
+  confirmPanel(t('remove.title', { name: g.name }), t('remove.noteManual'), t('remove.confirm'), async () => {
     try {
       await call('remove_game', { id: g.id });
       closeAll();
       // Remove the game right away, without a full scan.
       S.games = S.games.filter((x) => x.id !== g.id);
+      S.favorites = S.favorites.filter((id) => id !== g.id);
       renderRow();
       renderLibrary();
       toast(t('remove.done', { name: g.name }));
@@ -1063,6 +1071,19 @@ function removeGame(g) {
       toast(String(e), 'error');
     }
   });
+}
+
+/** Adds a game to Favorites (from the Library) or takes it off (from the Favorites tab). */
+async function setFavorite(g, on) {
+  try {
+    S.favorites = (await call('set_favorite', { id: g.id, on })) || [];
+    closeAll();
+    renderRow();
+    renderLibrary(g.id);
+    toast(t(on ? 'fav.added' : 'fav.removed', { name: g.name }));
+  } catch (e) {
+    toast(String(e), 'error');
+  }
 }
 
 // The audio category: sounds and music, plus the Windows default output device (it applies to games too).
@@ -1224,27 +1245,6 @@ function uninstallGame(g) {
   confirmPanel(t('uninstall.title', { name: g.name }), t('uninstall.note'), t('uninstall.confirm'), run);
 }
 
-async function openHiddenGames() {
-  let hidden = [];
-  try { hidden = (await call('hidden_games')) || []; } catch (e) { toast(String(e), 'error'); return; }
-  pushOverlay(listPanel({
-    title: t('hidden.title'),
-    note: hidden.length ? t('hidden.note') : t('hidden.none'),
-    items: hidden.map((h) => ({
-      label: h.name,
-      desc: t('hidden.restore'),
-      action: async () => {
-        try {
-          await call('restore_game', { id: h.id });
-          closeAll();
-          toast(t('hidden.done', { name: h.name }));
-          rescan(false);
-        } catch (e) { toast(String(e), 'error'); }
-      },
-    })),
-  }));
-}
-
 // Each subfolder of a folder listed here shows up in the library as a "Local" game.
 function openGameFolders() {
   const reopen = () => { closeAll(); renderSettings(); openGameFolders(); };
@@ -1296,17 +1296,20 @@ function applySettings() {
   sound.musicPlay(!!S.settings.music && !S.running?.started && !document.hidden);
 }
 
-function openGameOptions(g) {
+/** The options of a game. `from` is where they were opened: the Favorites tab or the Library. */
+function openGameOptions(g, from) {
   const running = S.running?.id === g.id;
   const items = [
     ...(running && S.running.started ? [{ label: t('game.back'), action: () => resumeGame() }] : []),
     running
       ? { label: t('opt.close'), danger: true, action: () => { closeTop(true); askCloseGame(); } }
       : { label: t('game.play'), action: () => { closeTop(true); launch(g); } },
+    ...(from === 'favorites' ? [{ label: t('fav.remove'), action: () => setFavorite(g, false) }] : []),
+    ...(from === 'library' && !isFavorite(g.id) ? [{ label: t('fav.add'), action: () => setFavorite(g, true) }] : []),
     { label: t('opt.openLocation'), desc: g.installDir, action: () => call('open_path', { path: g.installDir }).catch((e) => toast(String(e), 'error')) },
   ];
   if (!running) items.push({ label: t('opt.uninstall'), danger: true, action: () => uninstallGame(g) });
-  if (!running) items.push({ label: t('remove.confirm'), danger: true, action: () => removeGame(g) });
+  if (!running && g.id.startsWith('manual:')) items.push({ label: t('remove.confirm'), danger: true, action: () => removeGame(g) });
   // The running game can be closed from the options of any game in the library.
   const other = !running && gameById(S.running?.id);
   if (other) items.unshift({ label: t('opt.closeNamed', { name: other.name }), desc: t('opt.runningNow'), danger: true, action: () => { closeTop(true); askCloseGame(); } });
@@ -1639,6 +1642,7 @@ async function boot() {
   const snap = await call('get_state');
   Object.assign(S, {
     games: snap.games || [],
+    favorites: snap.favorites || [],
     stats: snap.stats || {},
     settings: snap.settings || {},
     theme: snap.theme || {},

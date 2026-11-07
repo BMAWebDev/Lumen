@@ -8,8 +8,8 @@ The interface is available in English (the default) and Romanian. Switch it in *
 
 ## Features
 
-- **Home screen**: your 12 most recently played games in a horizontal row. The selected cover grows and the background fades smoothly to the game's artwork.
-- **Library**: every game in a grid, with filters for Steam, Xbox and local games. Any game can be removed from the game options; Steam, Xbox and folder games stay installed and can be brought back from **Settings → Hidden games**.
+- **Favorites**: the games you added to favorites, in a horizontal row (most recently played first). The selected cover grows and the background fades smoothly to the game's artwork. Add a game from its options in the Library and take it off from its options on this tab.
+- **Library**: every game in a grid, with filters for Steam, Xbox and local games. Games you added by hand can be removed from the game options.
 - **Platforms**: lists the gaming launchers and stores installed on the PC (Steam, Epic Games Store, GOG Galaxy, EA app, Ubisoft Connect, Battle.net, Rockstar, Riot, Amazon Games, itch.io, Xbox) with their real icons. Pick one to open it; Lumen steps aside and comes back to the front when you close the platform. While a platform is in front, the Guide / PS button is left to it.
 - **Video**: **Settings → Video** lists the screens and lets you pick the main display, which is where Lumen and the games open. With several screens you can also switch between extended and duplicated.
 - **Bluetooth**: open it from **Settings → Bluetooth**. It lists the paired devices (controllers, headphones...) with their connection state; pick one to remove it, or choose **Add a device** to search for devices in pairing mode and pair with them. Devices that need a PIN must be paired from the Windows Bluetooth settings.
@@ -32,7 +32,7 @@ The interface is available in English (the default) and Romanian. Switch it in *
 | Back | B (○) | Esc |
 | Game options | Menu (☰) / Y (Options / △ on DualSense) | O |
 | Quick menu | View / Guide (Create / PS on DualSense) | Tab |
-| Switch Games ↔ Library | LB / RB | Q / E |
+| Switch tab | LB / RB | Q / E |
 | First / last game | LT / RT (L2 / R2) | Home / End |
 
 The mouse works too: one click selects, a second click launches.
