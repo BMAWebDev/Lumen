@@ -132,7 +132,7 @@ fn parse_sony(model: Sony, status: u8) -> Option<PadBattery> {
 /// up to the PC's Bluetooth and calls `on_handoff`.
 #[cfg(windows)]
 pub fn watch_ps_button(on_press: impl Fn(), on_handoff: impl Fn()) {
-    watch(on_press, || {}, Some(&on_handoff));
+    watch(on_press, || {}, Some(&on_handoff), || {});
 }
 
 /// How long the PS + Options combination has to be held to start Lumen.
@@ -140,15 +140,16 @@ pub fn watch_ps_button(on_press: impl Fn(), on_handoff: impl Fn()) {
 const COMBO_HOLD: std::time::Duration = std::time::Duration::from_millis(1200);
 
 /// Like `watch_ps_button`, but without the dongle handoff and without reacting to the short press:
-/// it calls `on_combo` once when PS and Options are held together.
-/// Used by the process that waits for the combination while Lumen is closed.
+/// it calls `on_combo` once when PS and Options are held together, and `on_connect` whenever a
+/// Sony controller shows up that was not there before (the ones present at the start don't count).
+/// Used by the process that waits for them while Lumen is closed.
 #[cfg(windows)]
-pub fn watch_combo(on_combo: impl Fn()) {
-    watch(|| {}, on_combo, None);
+pub fn watch_combo(on_combo: impl Fn(), on_connect: impl Fn()) {
+    watch(|| {}, on_combo, None, on_connect);
 }
 
 #[cfg(windows)]
-fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>) {
+fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>, on_connect: impl Fn()) {
     use std::time::{Duration, Instant};
 
     struct Pad {
@@ -168,6 +169,7 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
     loop {
         // New controllers show up on a re-enumeration, every 3 seconds.
         if last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+            let first_scan = last_scan.is_none();
             last_scan = Some(Instant::now());
             if api.refresh_devices().is_ok() {
                 for info in api.device_list() {
@@ -193,6 +195,9 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
                             combo_since: None,
                             combo_fired: false,
                         });
+                        if !first_scan {
+                            on_connect();
+                        }
                     }
                 }
             }
@@ -236,7 +241,7 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
 pub fn watch_ps_button(_on_press: impl Fn(), _on_handoff: impl Fn()) {}
 
 #[cfg(not(windows))]
-pub fn watch_combo(_on_combo: impl Fn()) {}
+pub fn watch_combo(_on_combo: impl Fn(), _on_connect: impl Fn()) {}
 
 /// The DS5 Bridge dongle (Pico 2 W) presents itself over USB as a DualSense. The firmware with
 /// handoff marks its version (report 0xF8) with "+handoff" when it knows the address and key of
@@ -289,6 +294,37 @@ struct XInputBattery {
 extern "system" {
     fn XInputGetBatteryInformation(user: u32, dev_type: u8, info: *mut XInputBattery) -> u32;
 }
+
+/// Calls `on_connect` whenever an Xbox controller (XInput) shows up that was not there before.
+/// The ones present at the start don't count. It runs forever, on the thread that calls it.
+#[cfg(windows)]
+pub fn watch_xinput_connect(on_connect: impl Fn()) {
+    use std::time::Duration;
+
+    // XINPUT_STATE: a packet number followed by the 12 bytes of the gamepad.
+    #[link(name = "xinput")]
+    extern "system" {
+        fn XInputGetState(user: u32, state: *mut [u8; 16]) -> u32;
+    }
+    let mut was = [false; 4];
+    let mut first = true;
+    loop {
+        for (user, was) in was.iter_mut().enumerate() {
+            let mut state = [0u8; 16];
+            let now = unsafe { XInputGetState(user as u32, &mut state) } == 0;
+            if now && !*was && !first {
+                on_connect();
+            }
+            *was = now;
+        }
+        first = false;
+        // Querying an empty slot is expensive: a slow poll is enough to notice a new controller.
+        std::thread::sleep(Duration::from_secs(2));
+    }
+}
+
+#[cfg(not(windows))]
+pub fn watch_xinput_connect(_on_connect: impl Fn()) {}
 
 #[cfg(windows)]
 fn xinput() -> Vec<PadBattery> {

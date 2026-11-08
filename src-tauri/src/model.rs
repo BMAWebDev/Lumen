@@ -53,6 +53,8 @@ pub struct Settings {
     /// Folders whose subfolders are separately installed games.
     pub game_folders: Vec<String>,
     pub autostart: bool,
+    /// Starts Lumen when a recognized controller connects while it is closed.
+    pub start_on_pad: bool,
     /// Interface language: `en` (default) or `ro`.
     pub language: String,
 }
@@ -68,6 +70,7 @@ impl Default for Settings {
             reduce_motion: false,
             game_folders: Vec::new(),
             autostart: false,
+            start_on_pad: false,
             language: "en".into(),
         }
     }

@@ -878,6 +878,7 @@ function settingsCats() {
         items: [
           { label: t('settings.language'), desc: langName, action: openLanguage },
           toggle('autostart', t('settings.autostart'), t('settings.autostart.desc')),
+          toggle('startOnPad', t('settings.startOnPad'), t('settings.startOnPad.desc')),
           toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
           toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
         ],
