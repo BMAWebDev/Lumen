@@ -250,6 +250,7 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
             "music" => s.settings.music = value,
             "onlineArt" => s.settings.online_art = value,
             "reduceMotion" => s.settings.reduce_motion = value,
+            "startOnPad" => s.settings.start_on_pad = value,
             _ => return Err(t!(format!("Unknown setting: {key}"), format!("Setare necunoscută: {key}"))),
         }
         store::save(&s.data_dir, "settings.json", &s.settings);
@@ -511,21 +512,49 @@ fn migrate_autostart(app: AppHandle) {
 /// the Guide button, which opens the menu from inside the application.
 const APP_MUTEX: &str = r"Local\Lumen.App";
 const LISTENER_MUTEX: &str = r"Local\Lumen.Listener";
+/// The `identifier` from tauri.conf.json, which names the application data folder.
+const APP_IDENTIFIER: &str = "dev.lumen.launcher";
 
-/// A tiny process (no window) that stays after Lumen closes and starts the
-/// application when you hold PS + Options. While Lumen is running it does nothing.
+/// Starts the application, unless it is already running.
+fn start_app() {
+    if platform::mutex_exists(APP_MUTEX) {
+        return;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let _ = platform::hidden(&exe.to_string_lossy()).spawn();
+    }
+}
+
+/// A recognized controller just connected: starts Lumen if the user turned that on. The listener has
+/// no application state, so it reads the settings file (the same folder Tauri uses for the app data).
+fn on_pad_connected() {
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+
+    static LAST: Mutex<Option<Instant>> = Mutex::new(None);
+    // A controller can be reported by both HID and XInput, or several times in a row.
+    if let Ok(mut last) = LAST.lock() {
+        if last.is_some_and(|t| t.elapsed() < Duration::from_secs(10)) {
+            return;
+        }
+        *last = Some(Instant::now());
+    }
+    let Some(appdata) = std::env::var_os("APPDATA") else { return };
+    let dir = PathBuf::from(appdata).join(APP_IDENTIFIER);
+    if store::load::<Settings>(&dir, "settings.json").start_on_pad {
+        start_app();
+    }
+}
+
+/// A tiny process (no window) that stays after Lumen closes and starts the application when
+/// you hold PS + Options, or when a controller connects (if that setting is on).
+/// While Lumen is running it does nothing.
 fn listen() {
     if !platform::claim_mutex(LISTENER_MUTEX) {
         return;
     }
-    pads::watch_combo(|| {
-        if platform::mutex_exists(APP_MUTEX) {
-            return;
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            let _ = platform::hidden(&exe.to_string_lossy()).spawn();
-        }
-    });
+    thread::spawn(|| pads::watch_xinput_connect(on_pad_connected));
+    pads::watch_combo(start_app, on_pad_connected);
 }
 
 /// A normally started Lumen makes sure the listener is running, so it can be restarted after exit.

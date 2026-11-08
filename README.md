@@ -20,6 +20,7 @@ The interface is available in English (the default) and Romanian. Switch it in *
 - **Guide / PS button** opens the quick menu from anywhere, even in game. The Xbox Guide button is read through XInput, the PS button on DualSense / DualShock 4 directly over HID, so no Steam Input or DS4Windows is needed.
 - **Quick menu**: Home, Close game, Refresh, Settings, Power (sleep, restart, shut down).
 - **Start with Windows**, for a console-like experience from boot.
+- **Start when a controller connects** (off by default): with Lumen closed, connecting a DualSense / DualShock 4 or an Xbox controller opens it. Holding PS + Options on a Sony controller always does. This works through a small background process that Lumen starts the first time it runs.
 - **Themes**: custom sounds, music, font and wallpaper without touching the code.
 - **Languages**: English and Romanian, switchable at runtime from Settings.
 
