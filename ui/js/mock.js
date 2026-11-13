@@ -100,7 +100,7 @@ const stats = {};
 DATA.forEach(([, , , , , ago, play], i) => {
   if (ago) stats[games[i].id] = { playtimeSec: play, lastPlayed: now - ago, launches: 3 + i };
 });
-const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, startOnPad: false, language: 'en', gameFolders: [] };
+const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, startOnPad: false, checkUpdates: true, language: 'en', gameFolders: [] };
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
@@ -205,6 +205,12 @@ export async function invoke(cmd, args) {
       return;
     case 'theme_file':
       throw new Error('no theme');
+    case 'check_update':
+      await new Promise((r) => setTimeout(r, 600));
+      return { version: '0.3.0', url: 'https://github.com/BMAWebDev/Lumen/releases' };
+    case 'install_update':
+      await new Promise((r) => setTimeout(r, 1200));
+      throw new Error('Mock: nothing to install.');
     case 'clock_24h':
       return true;
     case 'battery':
