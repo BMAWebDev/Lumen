@@ -115,6 +115,8 @@ const S = {
   running: null,
   user: '',
   version: '',
+  update: null, // { version, url } when a newer release exists
+  updating: false,
   view: 'home',
   zone: 'row',
   row: [],
@@ -881,6 +883,10 @@ function settingsCats() {
           toggle('startOnPad', t('settings.startOnPad'), t('settings.startOnPad.desc')),
           toggle('minimizeOnLaunch', t('settings.minimize'), t('settings.minimize.desc')),
           toggle('pauseGame', t('settings.pause'), t('settings.pause.desc')),
+          toggle('checkUpdates', t('settings.checkUpdates'), t('settings.checkUpdates.desc')),
+          S.update
+            ? { label: t('update.install', { version: S.update.version }), desc: t('update.install.desc'), action: askInstallUpdate }
+            : { label: t('update.check'), desc: S.updateNote || t('update.check.desc'), action: () => checkUpdate(true) },
         ],
       }),
     },
@@ -1472,6 +1478,47 @@ function updateRunning() {
 }
 
 // ======================================================================
+// Updates
+// ======================================================================
+/** Looks for a newer release. A manual check also reports "up to date" and errors; the automatic one stays silent. */
+async function checkUpdate(manual) {
+  if (S.updating) return;
+  try {
+    if (manual) { S.updateNote = t('update.checking'); renderSettingsIfGeneral(); }
+    const info = await call('check_update');
+    const isNew = info && info.version !== S.update?.version;
+    S.update = info || null;
+    S.updateNote = info ? '' : t('update.upToDate');
+    $('#btn-settings').classList.toggle('has-update', !!info);
+    if (info && (manual || isNew)) toast(t('update.available', { version: info.version }));
+    else if (manual) toast(t('update.upToDate'));
+  } catch (e) {
+    S.updateNote = '';
+    if (manual) toast(String(e), 'error');
+  }
+  renderSettingsIfGeneral();
+}
+
+const renderSettingsIfGeneral = () => { if (S.view === 'settings' && settingsCats()[S.setCat]?.id === 'general') renderSettings(); };
+
+function askInstallUpdate() {
+  if (!S.update) return;
+  confirmPanel(t('update.title', { version: S.update.version }), t('update.note'), t('update.confirm'), installUpdate);
+}
+
+async function installUpdate() {
+  if (S.updating) return;
+  S.updating = true;
+  toast(t('update.downloading'));
+  try {
+    await call('install_update'); // Lumen closes itself and the installer starts the new version
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  S.updating = false;
+}
+
+// ======================================================================
 // Notifications, hints, clock
 // ======================================================================
 function toast(msg, kind = 'info') {
@@ -1711,6 +1758,10 @@ async function boot() {
   setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); loadPlatforms(); }, 1500);
   setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
   setTimeout(() => cachedCall('video', 'video_state').catch(() => {}), 5500);
+  // Once a while after start, and then every few hours if Lumen stays open (it is meant to run for days).
+  const autoCheck = () => { if (S.settings.checkUpdates && !S.running?.started) checkUpdate(false); };
+  setTimeout(autoCheck, 12000);
+  setInterval(autoCheck, 6 * 3600 * 1000);
 }
 
 boot();

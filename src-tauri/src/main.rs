@@ -14,6 +14,7 @@ mod platforms;
 mod steam;
 mod store;
 mod uninstall;
+mod update;
 mod util;
 mod vdf;
 mod xbox;
@@ -251,6 +252,7 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
             "onlineArt" => s.settings.online_art = value,
             "reduceMotion" => s.settings.reduce_motion = value,
             "startOnPad" => s.settings.start_on_pad = value,
+            "checkUpdates" => s.settings.check_updates = value,
             _ => return Err(t!(format!("Unknown setting: {key}"), format!("Setare necunoscută: {key}"))),
         }
         store::save(&s.data_dir, "settings.json", &s.settings);
@@ -477,6 +479,18 @@ fn bluetooth_remove(id: String) -> Result<(), String> {
     bluetooth::remove(&id)
 }
 
+/// Looks for a newer release on GitHub (a network request, so off the main thread). `None`: up to date.
+#[tauri::command(async)]
+fn check_update() -> Result<Option<update::UpdateInfo>, String> {
+    update::check()
+}
+
+/// Downloads the update found by `check_update`, closes Lumen and installs it.
+#[tauri::command(async)]
+fn install_update(app: AppHandle) -> Result<(), String> {
+    update::install(&app)
+}
+
 #[tauri::command]
 fn power(action: String) {
     thread::spawn(move || {
@@ -633,6 +647,8 @@ fn main() {
             bluetooth_scan,
             bluetooth_pair,
             bluetooth_remove,
+            check_update,
+            install_update,
             power,
             exit_app
         ])

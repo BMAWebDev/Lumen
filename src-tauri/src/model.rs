@@ -55,6 +55,8 @@ pub struct Settings {
     pub autostart: bool,
     /// Starts Lumen when a recognized controller connects while it is closed.
     pub start_on_pad: bool,
+    /// Looks for a new version of Lumen when it starts.
+    pub check_updates: bool,
     /// Interface language: `en` (default) or `ro`.
     pub language: String,
 }
@@ -71,6 +73,7 @@ impl Default for Settings {
             game_folders: Vec::new(),
             autostart: false,
             start_on_pad: false,
+            check_updates: true,
             language: "en".into(),
         }
     }
