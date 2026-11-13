@@ -345,6 +345,13 @@ body[data-zone="plat"] .gtile.focused .art::after { opacity: 1; }
 .item.focused { background: #fff; color: #0a1022; }
 .item.focused small { color: #48526a; }
 .item.danger:not(.focused) { color: #ffb4b4; }
+.spinner {
+  width: 2.4rem; height: 2.4rem; flex: none; border-radius: 50%;
+  border: .3rem solid rgba(255, 255, 255, 0.18); border-top-color: var(--azure);
+  animation: spin 800ms linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.item.focused .spinner { border-color: rgba(10, 16, 34, 0.15); border-top-color: var(--azure); }
 .switch {
   flex: none; position: relative; width: 6rem; height: 3.4rem; border-radius: 1.7rem;
   background: rgba(255, 255, 255, 0.2); transition: background 180ms;

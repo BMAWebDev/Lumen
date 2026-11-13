@@ -39,6 +39,42 @@ pub fn powershell(script: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Like `powershell`, but gives up (and kills the process) after `secs` seconds, so a stuck COM call
+/// cannot leave the interface waiting forever.
+pub fn powershell_timeout(script: &str, secs: u64) -> Result<String, String> {
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let mut child = hidden("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+        .arg(util::powershell_encode(script))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| crate::t!(format!("PowerShell could not be started: {e}"), format!("PowerShell nu a putut fi pornit: {e}")))?;
+    let mut stdout = child.stdout.take().ok_or("no output")?;
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf);
+        let _ = tx.send(buf);
+    });
+    match rx.recv_timeout(Duration::from_secs(secs)) {
+        Ok(buf) => {
+            let _ = child.wait();
+            Ok(String::from_utf8_lossy(&buf).into_owned())
+        }
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(crate::t!("The operation took too long.", "Operațiunea a durat prea mult.").into())
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Windows API (direct declarations, no extra crates)
 // ---------------------------------------------------------------------------

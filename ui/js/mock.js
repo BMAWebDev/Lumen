@@ -208,6 +208,14 @@ export async function invoke(cmd, args) {
     case 'check_update':
       await new Promise((r) => setTimeout(r, 600));
       return { version: '0.3.0', url: 'https://github.com/BMAWebDev/Lumen/releases' };
+    case 'check_os_updates':
+      await new Promise((r) => setTimeout(r, 900));
+      return { count: 2, titles: ['2026-11 Security Update (KB5132061)', 'Security Intelligence Update for Microsoft Defender Antivirus'], rebootRequired: false };
+    case 'install_os_updates':
+      await new Promise((r) => setTimeout(r, 2500));
+      return { installed: 2, failed: 0, rebootRequired: true };
+    case 'open_windows_update':
+      return;
     case 'install_update':
       await new Promise((r) => setTimeout(r, 1200));
       throw new Error('Mock: nothing to install.');

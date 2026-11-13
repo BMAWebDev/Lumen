@@ -117,6 +117,7 @@ const S = {
   version: '',
   update: null, // { version, url } when a newer release exists
   updating: false,
+  os: null, // { count, titles, rebootRequired } from Windows Update
   view: 'home',
   zone: 'row',
   row: [],
@@ -545,7 +546,7 @@ function platformsAction(a) {
   const cols = gridCols(platGrid);
   const n = S.platforms.length;
   let ni = S.platIndex;
-  if (a === 'left') ni = S.platIndex % cols === 0 ? S.platIndex : S.platIndex - 1;
+  if (a === 'left') ni = Math.max(0, S.platIndex - 1);
   else if (a === 'right') ni = Math.min(n - 1, S.platIndex + 1);
   else if (a === 'down') ni = S.platIndex + cols < n ? S.platIndex + cols : (Math.floor(S.platIndex / cols) < Math.floor((n - 1) / cols) ? n - 1 : S.platIndex);
   else if (a === 'up') {
@@ -648,7 +649,7 @@ function libraryAction(a) {
     const cols = gridCols();
     const n = S.libList.length;
     let ni = S.libIndex;
-    if (a === 'left') ni = S.libIndex % cols === 0 ? S.libIndex : S.libIndex - 1;
+    if (a === 'left') ni = Math.max(0, S.libIndex - 1); // from the start of a row it continues at the end of the previous one
     else if (a === 'right') ni = Math.min(n - 1, S.libIndex + 1);
     else if (a === 'down') ni = S.libIndex + cols < n ? S.libIndex + cols : (Math.floor(S.libIndex / cols) < Math.floor((n - 1) / cols) ? n - 1 : S.libIndex);
     else if (a === 'up') {
@@ -670,7 +671,13 @@ function libraryAction(a) {
   }
 }
 
-// L2 / R2 (Home / End): jump to the first or last game in the row or library.
+/** The first or last index of the grid row that holds `index`. */
+const rowEdge = (index, n, cols, last) => {
+  const start = Math.floor(index / cols) * cols;
+  return last ? Math.min(n - 1, start + cols - 1) : start;
+};
+
+// L2 / R2 (Home / End): jump to the first or last item of the current row (in the grids, the row of the focused tile).
 function jumpToEnd(last) {
   if (S.view === 'home') {
     const n = S.rowEls.length;
@@ -685,7 +692,7 @@ function jumpToEnd(last) {
   } else if (S.view === 'platforms') {
     const n = S.platforms.length;
     if (!n) return;
-    const ni = last ? n - 1 : 0;
+    const ni = rowEdge(S.platIndex, n, gridCols(platGrid), last);
     const moved = S.zone !== 'plat' || ni !== S.platIndex;
     S.zone = 'plat';
     if (!moved) { bump(S.platEls[ni], last ? 1 : -1); return; }
@@ -695,7 +702,7 @@ function jumpToEnd(last) {
   } else {
     const n = S.libList.length;
     if (!n) return;
-    const ni = last ? n - 1 : 0;
+    const ni = rowEdge(S.libIndex, n, gridCols(), last);
     const moved = S.zone !== 'grid' || ni !== S.libIndex;
     S.zone = 'grid';
     if (!moved) { bump(S.libEls[ni], last ? 1 : -1); return; }
@@ -783,6 +790,7 @@ function closeAll() {
 
 /** The control at the end of an option: a switch for on/off settings (`toggle`), a radio for one choice among several (`radio`). */
 function control(it) {
+  if (it.busy) return '<span class="spinner" aria-hidden="true"></span>';
   if (it.toggle) return `<span class="switch ${it.toggle() ? 'on' : ''}"><i></i></span>`;
   if (it.radio) return `<span class="radio ${it.radio() ? 'on' : ''}"><i></i></span>`;
   return '';
@@ -887,6 +895,7 @@ function settingsCats() {
           S.update
             ? { label: t('update.install', { version: S.update.version }), desc: t('update.install.desc'), action: askInstallUpdate }
             : { label: t('update.check'), desc: S.updateNote || t('update.check.desc'), action: () => checkUpdate(true) },
+          osUpdateItem(),
         ],
       }),
     },
@@ -1489,7 +1498,7 @@ async function checkUpdate(manual) {
     const isNew = info && info.version !== S.update?.version;
     S.update = info || null;
     S.updateNote = info ? '' : t('update.upToDate');
-    $('#btn-settings').classList.toggle('has-update', !!info);
+    updateDot();
     if (info && (manual || isNew)) toast(t('update.available', { version: info.version }));
     else if (manual) toast(t('update.upToDate'));
   } catch (e) {
@@ -1497,6 +1506,72 @@ async function checkUpdate(manual) {
     if (manual) toast(String(e), 'error');
   }
   renderSettingsIfGeneral();
+}
+
+const updateDot = () => $('#btn-settings').classList.toggle('has-update', !!S.update || !!S.os?.count || !!S.os?.rebootRequired);
+
+/** Asks Windows Update what is waiting (nothing is installed by Lumen). The automatic check only speaks up for new findings. */
+async function checkOsUpdates(manual) {
+  if (S.osChecking) return;
+  S.osChecking = true;
+  if (manual) { S.osNote = t('update.checking'); renderSettingsIfGeneral(); }
+  try {
+    const os = await call('check_os_updates');
+    const isNew = os.count > (S.os?.count || 0);
+    S.os = os;
+    S.osNote = '';
+    if (os.count && (manual || isNew)) toast(t('os.available', { n: os.count }));
+    else if (manual) toast(os.rebootRequired ? t('os.reboot') : t('os.upToDate'));
+  } catch (e) {
+    S.osNote = '';
+    if (manual) toast(String(e), 'error');
+  }
+  S.osChecking = false;
+  updateDot();
+  renderSettingsIfGeneral();
+}
+
+/** Installs the waiting Windows updates (Windows asks for administrator approval first). */
+async function installOsUpdates() {
+  if (S.osInstalling) return;
+  S.osInstalling = true;
+  S.osProgress = null;
+  renderSettingsIfGeneral();
+  toast(t('os.installing'));
+  try {
+    const r = await call('install_os_updates');
+    S.os = { count: 0, titles: [], rebootRequired: r.rebootRequired };
+    toast(r.failed ? t('os.partial', { done: r.installed, failed: r.failed }) : t('os.installed', { n: r.installed }), r.failed ? 'error' : 'info');
+  } catch (e) {
+    toast(String(e), 'error');
+  }
+  S.osInstalling = false;
+  S.osProgress = null;
+  updateDot();
+  renderSettingsIfGeneral();
+}
+
+function osUpdateItem() {
+  if (S.osInstalling) {
+    const p = S.osProgress;
+    return {
+      label: p ? t('os.progress', { i: p.i, n: p.n }) : t('os.installing'),
+      desc: p ? t(p.stage === 'download' ? 'os.downloading' : 'os.installingOne', { title: p.title }) : t('os.installing.desc'),
+      busy: true,
+      action: () => {},
+    };
+  }
+  if (S.os?.count) {
+    return {
+      label: t('os.pending', { n: S.os.count }),
+      desc: S.os.titles.join(' · '),
+      action: () => confirmPanel(t('os.installTitle', { n: S.os.count }), t('os.installNote'), t('os.installConfirm'), installOsUpdates),
+    };
+  }
+  if (S.os?.rebootRequired) {
+    return { label: t('os.reboot'), desc: t('os.reboot.desc'), action: () => confirmPanel(t('power.restartTitle'), t('power.note'), t('power.restartConfirm'), () => call('power', { action: 'restart' })) };
+  }
+  return { label: t('os.check'), desc: S.osNote || (S.os ? t('os.upToDate') : t('os.check.desc')), action: () => checkOsUpdates(true) };
 }
 
 const renderSettingsIfGeneral = () => { if (S.view === 'settings' && settingsCats()[S.setCat]?.id === 'general') renderSettings(); };
@@ -1713,6 +1788,7 @@ async function boot() {
   updateRunning();
 
   on('library', onLibrary);
+  on('os-progress', (p) => { S.osProgress = p; renderSettingsIfGeneral(); });
   on('guide', () => {
     const top = stack[stack.length - 1];
     // Like on a console: a second press on PS / Guide takes you back to the game.
@@ -1759,7 +1835,11 @@ async function boot() {
   setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
   setTimeout(() => cachedCall('video', 'video_state').catch(() => {}), 5500);
   // Once a while after start, and then every few hours if Lumen stays open (it is meant to run for days).
-  const autoCheck = () => { if (S.settings.checkUpdates && !S.running?.started) checkUpdate(false); };
+  const autoCheck = () => {
+    if (!S.settings.checkUpdates || S.running?.started) return;
+    checkUpdate(false);
+    checkOsUpdates(false);
+  };
   setTimeout(autoCheck, 12000);
   setInterval(autoCheck, 6 * 3600 * 1000);
 }

@@ -485,6 +485,31 @@ fn check_update() -> Result<Option<update::UpdateInfo>, String> {
     update::check()
 }
 
+/// Asks Windows Update what is waiting to be installed (slow: up to a minute, so off the main thread).
+#[tauri::command(async)]
+fn check_os_updates() -> Result<update::OsUpdates, String> {
+    update::check_os()
+}
+
+/// Downloads and installs the waiting Windows updates (asks for administrator approval, can take a long time).
+#[tauri::command(async)]
+fn install_os_updates(app: AppHandle) -> Result<update::OsInstall, String> {
+    update::install_os(&app)
+}
+
+/// Opens Windows Update in the system Settings. Lumen steps aside so the window is not hidden behind it.
+#[tauri::command]
+fn open_windows_update(app: AppHandle) -> Result<(), String> {
+    update::open_windows_update()?;
+    thread::spawn(move || {
+        thread::sleep(std::time::Duration::from_millis(900));
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.minimize();
+        }
+    });
+    Ok(())
+}
+
 /// Downloads the update found by `check_update`, closes Lumen and installs it.
 #[tauri::command(async)]
 fn install_update(app: AppHandle) -> Result<(), String> {
@@ -648,6 +673,9 @@ fn main() {
             bluetooth_pair,
             bluetooth_remove,
             check_update,
+            check_os_updates,
+            install_os_updates,
+            open_windows_update,
             install_update,
             power,
             exit_app
