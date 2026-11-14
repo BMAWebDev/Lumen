@@ -136,6 +136,12 @@ export async function invoke(cmd, args) {
     case 'set_language':
       settings.language = args.language;
       return { ...settings };
+    case 'set_bluetooth_name': {
+      const names = { ...(settings.bluetoothNames || {}) };
+      if (args.name.trim()) names[args.id] = args.name.trim(); else delete names[args.id];
+      settings.bluetoothNames = names;
+      return { ...settings };
+    }
     case 'set_setting':
       settings[args.key] = args.value;
       return { ...settings };

@@ -260,6 +260,20 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
     }
 }
 
+/// Gives a Bluetooth device a name of the user's choosing; an empty name goes back to the Windows one.
+#[tauri::command]
+fn set_bluetooth_name(state: State<'_, AppState>, id: String, name: String) -> Result<Settings, String> {
+    let name = name.trim().chars().take(40).collect::<String>();
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    if name.is_empty() {
+        s.settings.bluetooth_names.remove(&id);
+    } else {
+        s.settings.bluetooth_names.insert(id, name);
+    }
+    store::save(&s.data_dir, "settings.json", &s.settings);
+    Ok(s.settings.clone())
+}
+
 /// Changes the interface language (also the language of the backend's own messages) and saves it.
 #[tauri::command]
 fn set_language(app: AppHandle, state: State<'_, AppState>, language: String) -> Result<Settings, String> {
@@ -672,6 +686,7 @@ fn main() {
             bluetooth_scan,
             bluetooth_pair,
             bluetooth_remove,
+            set_bluetooth_name,
             check_update,
             check_os_updates,
             install_os_updates,

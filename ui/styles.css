@@ -345,6 +345,48 @@ body[data-zone="plat"] .gtile.focused .art::after { opacity: 1; }
 .item.focused { background: #fff; color: #0a1022; }
 .item.focused small { color: #48526a; }
 .item.danger:not(.focused) { color: #ffb4b4; }
+/* Text popup with the on-screen keyboard: docked at the bottom, full width, like the console ones. */
+.dialog {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  box-sizing: border-box; padding: 3rem max(6rem, calc((100vw - 120rem) / 2)) 3rem;
+  background: rgba(8, 11, 20, 0.97); border-top: 0.1rem solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 -2rem 6rem rgba(0, 0, 0, 0.5);
+  transform: translate3d(0, 100%, 0); transition: transform 280ms var(--ease);
+}
+.dialog.in { transform: none; }
+.dialog header { padding: 0 0 1.6rem; }
+.dialog h2 { margin: 0; font-size: 2.6rem; font-weight: 300; }
+.dialog header p { margin: 0.6rem 0 0; color: var(--dim); font-size: 1.6rem; }
+/* On-screen keyboard (11 columns; wide keys span several). */
+.kb { display: flex; flex-direction: column; gap: 0.4rem; }
+.kb-row { display: grid; grid-template-columns: repeat(11, 1fr); gap: 0.4rem; }
+.kb-key {
+  position: relative; font: inherit; font-size: 2.6rem; font-weight: 300; color: inherit; height: 6.4rem;
+  background: transparent; border: 0.2rem solid transparent; border-radius: 0.8rem; cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.kb-key.fn { font-size: 2rem; font-weight: 500; background: rgba(255, 255, 255, 0.07); }
+.kb-key.fn.on { background: rgba(255, 255, 255, 0.2); box-shadow: inset 0 -0.3rem 0 rgba(255, 255, 255, 0.7); }
+/* The three character-set keys (the ones R3 cycles through) form one joined strip, with no gap. */
+.kb-key.mode { margin-left: -0.4rem; border-radius: 0; }
+.kb-key.mode.first { margin-left: 0; border-top-left-radius: 0.8rem; border-bottom-left-radius: 0.8rem; }
+.kb-key.mode.last { border-top-right-radius: 0.8rem; border-bottom-right-radius: 0.8rem; }
+.kb-key.ok { background: rgba(94, 224, 138, 0.22); }
+.kb-key.focused { background: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.8); font-weight: 700; }
+/* The space bar's bracket: a little wider than the plain character was. */
+.kb-key .space-icon { display: block; width: 7rem; height: 1.4rem; margin: 0 auto; }
+/* Controller button the key answers to (shown while a controller is in use). */
+.kb-key i { position: absolute; top: 0.5rem; right: 0.8rem; font-style: normal; font-size: 1.2rem; font-weight: 400; color: var(--dim); }
+/* Text field of the rename panel. */
+.dialog .name-field {
+  display: block; box-sizing: border-box; width: 100%; margin: 0 0 2rem;
+  padding: 1.4rem 1.8rem; font: inherit; font-size: 2.2rem; color: inherit;
+  background: rgba(255, 255, 255, 0.08); border: 0.2rem solid rgba(255, 255, 255, 0.25); border-radius: 0.8rem; outline: none;
+}
+.dialog .name-field:focus { border-color: #fff; }
+/* The Bluetooth controller that is connected and driving Lumen right now. */
+.item.in-use:not(.focused), .item.in-use:not(.focused) small { color: #5ee08a; }
+.item.in-use.focused { background: #5ee08a; }
 .spinner {
   width: 2.4rem; height: 2.4rem; flex: none; border-radius: 50%;
   border: .3rem solid rgba(255, 255, 255, 0.18); border-top-color: var(--azure);

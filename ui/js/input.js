@@ -17,11 +17,13 @@ const BUTTONS = {
   // 8 = View / Share (left), 9 = Menu / Options (right). Button 16 (Guide / PS) is missing
   // on purpose: `guide.rs` reads it natively and emits the "guide" event; if it were mapped
   // here too, one press would open the quick menu and close it right away.
-  0: 'confirm', 1: 'back', 3: 'options', 8: 'menu', 9: 'options',
+  0: 'confirm', 1: 'back', 2: 'delete', 3: 'options', // 2 = square / X: deletes in the text popup only 8: 'menu', 9: 'options',
   4: 'prevTab', 5: 'nextTab', 6: 'first', 7: 'last', // LB / RB, LT / RT (L1 / R1, L2 / R2)
   12: 'up', 13: 'down', 14: 'left', 15: 'right',
+  11: 'mode', // R3: changes the character set of the on-screen keyboard
 };
 const DIRS = new Set(['up', 'down', 'left', 'right']);
+const REPEATING = new Set([...DIRS, 'delete']); // held buttons that keep firing
 // Sony controllers (DualShock 4, DualSense) have vendor ID 054c; WebView2 puts it in `id`.
 const SONY = /054c|dualsense|dualshock|playstation|wireless controller/i;
 const padKind = (p) => (SONY.test(p?.id || '') ? 'playstation' : 'xbox');
@@ -43,7 +45,9 @@ export function createInput({ onAction, onDevice }) {
   window.addEventListener('keydown', (ev) => {
     // Block browser shortcuts that would break the console experience.
     if (ev.key === 'F5' || (ev.ctrlKey && /^[rpfsu+=\-0]$/i.test(ev.key))) { ev.preventDefault(); return; }
-    const a = KEYS[ev.key];
+    let a = KEYS[ev.key];
+    // Typing in a text field: only Enter and Escape reach the interface; everything else is text.
+    if (ev.target instanceof HTMLInputElement && ev.key !== 'Enter' && ev.key !== 'Escape') a = null;
     if (!a) return;
     ev.preventDefault();
     if (ev.repeat && !DIRS.has(a)) return;
@@ -91,7 +95,7 @@ export function createInput({ onAction, onDevice }) {
         held.set(a, { next: now + REPEAT_DELAY });
         setDevice('gamepad', padKind(p));
         onAction(a);
-      } else if (DIRS.has(a) && now >= h.next) {
+      } else if (REPEATING.has(a) && now >= h.next) {
         h.next = now + REPEAT_RATE;
         onAction(a, { repeat: true });
       }

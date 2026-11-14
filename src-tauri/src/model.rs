@@ -59,6 +59,8 @@ pub struct Settings {
     pub check_updates: bool,
     /// Interface language: `en` (default) or `ro`.
     pub language: String,
+    /// Names the user gave to Bluetooth devices, by Windows device id.
+    pub bluetooth_names: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -75,6 +77,7 @@ impl Default for Settings {
             start_on_pad: false,
             check_updates: true,
             language: "en".into(),
+            bluetooth_names: HashMap::new(),
         }
     }
 }

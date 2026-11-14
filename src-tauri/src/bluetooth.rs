@@ -24,6 +24,8 @@ $null = [Windows.Devices.Enumeration.DeviceInformation, Windows.Devices.Enumerat
 $null = [Windows.Devices.Enumeration.DeviceInformationCollection, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
 $null = [Windows.Devices.Enumeration.DevicePairingResult, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
 $null = [Windows.Devices.Enumeration.DeviceUnpairingResult, Windows.Devices.Enumeration, ContentType = WindowsRuntime]
+$null = [Windows.Devices.Bluetooth.BluetoothDevice, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
+$null = [Windows.Devices.Bluetooth.BluetoothLEDevice, Windows.Devices.Bluetooth, ContentType = WindowsRuntime]
 $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]
 function Await($op, $type, $ms) {
   $t = $asTask.MakeGenericMethod($type).Invoke($null, @($op))
@@ -32,17 +34,26 @@ function Await($op, $type, $ms) {
 }
 $kind = [Windows.Devices.Enumeration.DeviceInformationKind]::AssociationEndpoint
 $props = [string[]]@('System.Devices.Aep.IsConnected', 'System.Devices.Aep.IsPaired')
-# Bluetooth Classic and Bluetooth LE endpoints.
-$protocols = @('{e0cbf06c-cd8b-4647-bb8a-263b43f0f974}', '{bb7bb05e-5972-42b5-94fc-76eaa7084d49}')
+# Bluetooth Classic and Bluetooth LE paired devices. The dedicated selectors answer at once; a plain
+# protocol-id query over all association endpoints can hang for good on some PCs.
+$selectors = @([Windows.Devices.Bluetooth.BluetoothDevice]::GetDeviceSelectorFromPairingState($true), [Windows.Devices.Bluetooth.BluetoothLEDevice]::GetDeviceSelectorFromPairingState($true))
 function Find($ms) {
-  foreach ($p in $protocols) {
-    $c = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync("System.Devices.Aep.ProtocolId:=`"$p`"", $props, $kind)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) $ms
+  foreach ($s in $selectors) {
+    $c = Await ([Windows.Devices.Enumeration.DeviceInformation]::FindAllAsync($s, $props)) ([Windows.Devices.Enumeration.DeviceInformationCollection]) $ms
     foreach ($d in $c) { $d }
   }
 }
+# The Aep.IsConnected property comes back empty for these selectors; the device object knows.
+function Conn($d) {
+  try {
+    if ($d.Id -like 'BluetoothLE#*') { $o = Await ([Windows.Devices.Bluetooth.BluetoothLEDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothLEDevice]) 5000 }
+    else { $o = Await ([Windows.Devices.Bluetooth.BluetoothDevice]::FromIdAsync($d.Id)) ([Windows.Devices.Bluetooth.BluetoothDevice]) 5000 }
+    $o.ConnectionStatus -eq 'Connected'
+  } catch { [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
+}
 function Emit($devices) {
   $rows = @($devices | Where-Object { $_.Name } | ForEach-Object {
-    [pscustomobject]@{ id = $_.Id; name = $_.Name; connected = [bool]$_.Properties['System.Devices.Aep.IsConnected']; paired = [bool]$_.Pairing.IsPaired }
+    [pscustomobject]@{ id = $_.Id; name = $_.Name; connected = (Conn $_); paired = [bool]$_.Pairing.IsPaired }
   })
   [Console]::Out.Write('OK:' + (ConvertTo-Json -InputObject $rows -Compress))
 }

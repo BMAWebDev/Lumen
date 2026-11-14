@@ -742,6 +742,7 @@ function onAction(a) {
   if (S.booting) return;
   const top = stack[stack.length - 1];
   if (top) { top.handle(a); updateHints(); return; }
+  if (a === 'delete' || a === 'mode') return; // only the text popup uses these
   if (a === 'menu') { openQuick(); return; }
   if (a === 'prevTab' || a === 'nextTab') {
     // The shoulder buttons walk through the tabs and on to Settings, the page behind the gear.
@@ -852,6 +853,7 @@ function confirmPanel(title, note, label, action) {
 const setCatsEl = $('#set-cats');
 const setListEl = $('#set-list');
 let setToken = 0;
+let shownCat = null; // id of the category whose items are currently drawn
 
 // Results of slow backend calls (PowerShell/COM), kept after the first load so menus open at once.
 // A cached value is returned immediately while a fresh one is fetched; `onChange` runs if it differs.
@@ -953,6 +955,14 @@ async function renderSettings() {
   });
   $('#set-title').textContent = cats[S.setCat].label;
   const me = ++setToken;
+  // A slow category (Bluetooth's first load queries Windows) must not leave the previous category's items on screen.
+  if (shownCat !== cats[S.setCat].id) {
+    shownCat = cats[S.setCat].id;
+    S.setItems = [];
+    S.setEls = [];
+    setListEl.textContent = '';
+    $('#set-note').textContent = '';
+  }
   let r;
   try { r = await cats[S.setCat].load(); } catch (e) { r = { items: [], note: String(e) }; }
   if (me !== setToken) return; // another category was picked while this one loaded
@@ -965,7 +975,7 @@ function renderSettingsItems() {
   setListEl.textContent = '';
   S.setEls = S.setItems.map((it, i) => {
     if (it.group) setListEl.appendChild(el('li', 'set-group', esc(it.group)));
-    const li = el('li', 'item' + (it.danger ? ' danger' : ''));
+    const li = el('li', 'item' + (it.danger ? ' danger' : '') + (it.inUse ? ' in-use' : ''));
     li.innerHTML = `<span>${esc(it.label)}${it.desc ? `<small>${esc(it.desc)}</small>` : ''}</span>` +
       control(it);
     li.addEventListener('click', () => {
@@ -1185,12 +1195,187 @@ async function bluetoothLoad() {
   let devices = [];
   try { devices = (await cachedCall('bluetooth', 'bluetooth_paired', refreshCat('bluetooth'))) || []; } catch (e) { return { items: [], note: String(e) }; }
   const items = devices.map((d) => ({
-    label: d.name,
+    label: btName(d),
     desc: d.connected ? t('bt.connected') : t('bt.paired'),
-    action: () => confirmPanel(d.name, t('bt.removeNote'), t('bt.remove'), () => removeBluetooth(d)),
+    inUse: d.connected, // highlighted in green
+    action: () => openBluetoothDevice(d),
   }));
   items.push({ label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
   return { items, note: devices.length ? t('bt.note') : t('bt.none') };
+}
+
+/** The name shown for a device: the one the user gave it, else the Windows one. */
+const btName = (d) => S.settings.bluetoothNames?.[d.id] || d.name;
+
+/** What can be done with a paired device: rename it or remove it. */
+function openBluetoothDevice(d) {
+  pushOverlay(listPanel({
+    title: btName(d),
+    items: [
+      { label: t('bt.rename'), action: () => renameBluetooth(d) },
+      { label: t('bt.remove'), danger: true, action: () => confirmPanel(btName(d), t('bt.removeNote'), t('bt.remove'), () => removeBluetooth(d)) },
+      { label: t('common.cancel'), action: () => closeTop() },
+    ],
+  }));
+}
+
+function renameBluetooth(d) {
+  pushOverlay(textPanel({
+    title: t('bt.rename'),
+    note: t('bt.rename.note', { name: d.name }),
+    value: S.settings.bluetoothNames?.[d.id] || d.name,
+    placeholder: d.name,
+    onSubmit: async (value) => {
+      try {
+        S.settings = await call('set_bluetooth_name', { id: d.id, name: value });
+        toast(t('bt.renamed'));
+      } catch (e) { toast(String(e), 'error'); }
+      reloadBluetooth();
+    },
+  }));
+}
+
+// Character sets of the on-screen keyboard, 11 keys per row: letters, symbols and accents.
+const KB_MODES = {
+  abc: ['1234567890@', 'qwertyuiop#', 'asdfghjkl"/', 'zxcvbnm-_?!'],
+  sym: ['!@#$%^&*()_', '-+=[]{};:\'"', '<>,.?/\\|~`€', '£¥§°±×÷©®™…'],
+  acc: ['ăâîșțĂÂÎȘȚç', 'àáäåæèéêëñø', 'ìíïòóôöùúüý', 'ÿœšžčřłğıþð'],
+};
+const KB_MODE_ORDER = ['abc', 'sym', 'acc'];
+// What the buttons are called on each controller, shown in the corner of the keys they trigger.
+const KB_TAGS = {
+  playstation: { shift: 'L2', acc: 'R3', space: '△', del: '□', left: 'L1', right: 'R1', cancel: '○', done: 'R2' },
+  xbox: { shift: 'LT', acc: 'RS', space: 'Y', del: 'X', left: 'LB', right: 'RB', cancel: 'B', done: 'RT' },
+};
+
+/**
+ * Text popup with an on-screen keyboard docked at the bottom, laid out like the console ones.
+ * Controller: D-pad moves, confirm types, square deletes (hold to repeat), triangle types a space,
+ * L2 toggles shift, R3 changes the character set, L1 / R1 move the cursor, R2 is Done, back cancels.
+ * Physical keyboard: type in the field, Enter saves, Escape cancels. The keys also work with the mouse.
+ */
+function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, onSubmit }) {
+  const panel = el('div', 'dialog');
+  panel.setAttribute('role', 'dialog');
+  panel.innerHTML = `<header><h2>${esc(title)}</h2>${note ? `<p>${esc(note)}</p>` : ''}</header>`;
+  const input = el('input', 'name-field');
+  input.type = 'text';
+  input.maxLength = maxLength;
+  input.value = value;
+  input.placeholder = placeholder;
+  panel.appendChild(input);
+  const board = el('div', 'kb');
+  panel.appendChild(board);
+
+  const chars = (s) => [...s].map((ch) => ({ ch }));
+  const fn = (act, label, span) => ({ act, label, span });
+  const layout = () => [
+    ...KB_MODES[mode].map(chars),
+    [fn('shift', '⇧', 2), fn('abc', 'ABC', 1), fn('sym', '@#:', 1), fn('acc', 'àă', 1), { act: 'space', span: 4, svg: '<svg class="space-icon" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><path d="M1 3v13h98V3" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>' }, fn('del', '⌫', 2)],
+    [fn('left', '◀', 2), fn('right', '▶', 2), fn('cancel', t('common.cancel'), 3), fn('done', t('kb.done'), 4)],
+  ];
+  let mode = 'abc', r = 1, c = 0, shift = false, submitted = false;
+  const starts = (row) => { let x = 0; return row.map((k) => { const s = x; x += k.span || 1; return s; }); };
+  const label = (k) => (k.ch ? (shift ? k.ch.toUpperCase() : k.ch) : k.label);
+
+  const draw = () => {
+    const rows = layout();
+    r = clamp(r, 0, rows.length - 1);
+    c = clamp(c, 0, rows[r].length - 1);
+    const tags = S.device === 'gamepad' ? KB_TAGS[S.pad] || KB_TAGS.xbox : null;
+    board.textContent = '';
+    rows.forEach((row, ri) => {
+      const line = el('div', 'kb-row');
+      row.forEach((k, ci) => {
+        const on = (k.act === 'shift' && shift) || k.act === mode;
+        const b = el('button', 'kb-key' + (k.ch ? '' : ' fn') + (KB_MODES[k.act] ? ' mode' + (ci === 1 ? ' first' : ci === 3 ? ' last' : '') : '') + (ri === r && ci === c ? ' focused' : '') + (on ? ' on' : '') + (k.act === 'done' ? ' ok' : ''),
+          `${k.svg || esc(label(k))}${tags && tags[k.act] ? `<i>${esc(tags[k.act])}</i>` : ''}`);
+        b.tabIndex = -1;
+        b.style.gridColumn = `span ${k.span || 1}`;
+        b.addEventListener('mousedown', (e) => e.preventDefault()); // keep the focus in the field
+        b.addEventListener('click', () => { r = ri; c = ci; press(k); draw(); });
+        line.appendChild(b);
+      });
+      board.appendChild(line);
+    });
+  };
+
+  // Editing happens at the cursor of the field, so L1 / R1 and the physical keyboard agree.
+  const insert = (s) => {
+    const a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
+    if (input.value.length - (b - a) + s.length > maxLength) return;
+    input.setRangeText(s, a, b, 'end');
+  };
+  const deleteChar = () => {
+    const a = input.selectionStart ?? input.value.length, b = input.selectionEnd ?? a;
+    if (a !== b) input.setRangeText('', a, b, 'end');
+    else if (a > 0) input.setRangeText('', a - 1, a, 'end');
+  };
+  const moveCaret = (d) => {
+    const p = clamp((input.selectionStart ?? 0) + d, 0, input.value.length);
+    input.setSelectionRange(p, p);
+  };
+  const submit = () => { if (submitted) return; submitted = true; onSubmit(input.value); };
+  const setMode = (m) => { mode = m; shift = false; draw(); };
+  const press = (k) => {
+    sound.play('confirm');
+    if (k.ch) { insert(shift ? k.ch.toUpperCase() : k.ch); shift = false; }
+    else if (k.act === 'shift') shift = !shift;
+    else if (KB_MODES[k.act]) setMode(k.act);
+    else if (k.act === 'space') insert(' ');
+    else if (k.act === 'del') deleteChar();
+    else if (k.act === 'left') moveCaret(-1);
+    else if (k.act === 'right') moveCaret(1);
+    else if (k.act === 'cancel') closeTop();
+    else if (k.act === 'done') submit();
+  };
+  const move = (a) => {
+    const rows = layout();
+    if (a === 'left') c = Math.max(0, c - 1);
+    else if (a === 'right') c = Math.min(rows[r].length - 1, c + 1);
+    else {
+      const x = starts(rows[r])[c] + (rows[r][c].span || 1) / 2;
+      r = clamp(r + (a === 'up' ? -1 : 1), 0, rows.length - 1);
+      c = Math.max(0, starts(rows[r]).findLastIndex((s) => s <= Math.floor(x)));
+    }
+    sound.play('move');
+    draw();
+  };
+
+  return {
+    type: 'dialog',
+    // The key tags follow the device in use; the global hint bar stays empty for this popup.
+    hints: () => { draw(); return []; },
+    open() {
+      document.body.appendChild(panel);
+      draw();
+      nextFrame().then(() => {
+        panel.classList.add('in');
+        input.focus();
+        if (S.device === 'gamepad') input.setSelectionRange(input.value.length, input.value.length); else input.select();
+      });
+    },
+    close() { panel.classList.remove('in'); input.blur(); setTimeout(() => panel.remove(), 320); },
+    handle(a) {
+      if (a === 'menu') { closeAll(); sound.play('back'); return; }
+      if (S.device !== 'gamepad') {
+        if (a === 'confirm') { sound.play('confirm'); submit(); }
+        else if (a === 'back') closeTop();
+        return;
+      }
+      if (document.activeElement !== input) input.focus({ preventScroll: true });
+      if (['up', 'down', 'left', 'right'].includes(a)) move(a);
+      else if (a === 'confirm') { press(layout()[r][c]); draw(); }
+      else if (a === 'back') closeTop();
+      else if (a === 'delete') deleteChar();
+      else if (a === 'options') insert(' '); // triangle
+      else if (a === 'first') { shift = !shift; sound.play('move'); draw(); } // L2
+      else if (a === 'last') { sound.play('confirm'); submit(); } // R2
+      else if (a === 'prevTab') moveCaret(-1); // L1
+      else if (a === 'nextTab') moveCaret(1); // R1
+      else if (a === 'mode') setMode(KB_MODE_ORDER[(KB_MODE_ORDER.indexOf(mode) + 1) % KB_MODE_ORDER.length]); // R3
+    },
+  };
 }
 
 /** Closes the open panels and reloads the Bluetooth list. */
@@ -1203,7 +1388,7 @@ async function removeBluetooth(d) {
   try {
     await call('bluetooth_remove', { id: d.id });
     if (cacheStore.bluetooth) cacheStore.bluetooth = cacheStore.bluetooth.filter((x) => x.id !== d.id);
-    toast(t('bt.removed', { name: d.name }));
+    toast(t('bt.removed', { name: btName(d) }));
   } catch (e) { toast(String(e), 'error'); }
   reloadBluetooth();
 }
@@ -1626,6 +1811,7 @@ function updateHints() {
   const top = stack[stack.length - 1];
   let list;
   if (top?.type === 'launch') list = S.running?.started ? [['menu', 'hint.menu']] : [['back', 'hint.cancel'], ['menu', 'hint.menu']];
+  else if (top?.hints) list = top.hints();
   else if (top) list = [['confirm', 'hint.select'], ['back', 'hint.back']];
   else if (S.view === 'home' && S.zone === 'row' && curGame()) list = [['confirm', 'hint.play'], ['options', 'hint.options'], ['menu', 'hint.menu']];
   else if (S.view === 'settings' && S.zone === 'scat') list = [['confirm', 'hint.select'], ['back', 'hint.back'], ['menu', 'hint.menu']];
