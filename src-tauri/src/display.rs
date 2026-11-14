@@ -110,9 +110,57 @@ public static class Video {
     return (int)topo;
   }
 
+  [StructLayout(LayoutKind.Sequential)]
+  struct LUID { public uint Low; public int High; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct SOURCE_NAME {
+    public int type, size; public LUID adapter; public uint id;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string gdi;
+  }
+  [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint flags, ref uint paths, byte[] pathInfo, ref uint modes, byte[] modeInfo, IntPtr topology);
+  [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SOURCE_NAME req);
+  [DllImport("user32.dll")] static extern int SetDisplayConfig(uint np, byte[] paths, uint nm, byte[] modes, uint flags);
+
+  // Makes `name` the main display through the modern display-config API: it moves all the screens
+  // at once, so Windows never sees an in-between layout it would refuse (the old API fails with -1).
+  static int SetPrimaryCcd(string name) {
+    uint np, nm;
+    int r = GetDisplayConfigBufferSizes(2, out np, out nm);
+    if (r != 0) return r;
+    var paths = new byte[np * 72]; var modes = new byte[nm * 64];
+    r = QueryDisplayConfig(2, ref np, paths, ref nm, modes, IntPtr.Zero);
+    if (r != 0) return r;
+    long srcIdx = -1;
+    for (int i = 0; i < np; i++) {
+      int o = i * 72;
+      var req = new SOURCE_NAME(); req.type = 1; req.size = Marshal.SizeOf(typeof(SOURCE_NAME));
+      req.adapter.Low = BitConverter.ToUInt32(paths, o); req.adapter.High = BitConverter.ToInt32(paths, o + 4);
+      req.id = BitConverter.ToUInt32(paths, o + 8);
+      if (DisplayConfigGetDeviceInfo(ref req) == 0 && req.gdi == name) { srcIdx = BitConverter.ToUInt32(paths, o + 12); break; }
+    }
+    if (srcIdx < 0 || srcIdx >= nm) return -101;
+    int ox = BitConverter.ToInt32(modes, (int)srcIdx * 64 + 28), oy = BitConverter.ToInt32(modes, (int)srcIdx * 64 + 32);
+    if (ox == 0 && oy == 0) return 0;
+    for (int i = 0; i < nm; i++) {
+      int o = i * 64;
+      if (BitConverter.ToUInt32(modes, o) != 1) continue; // only source modes carry a position
+      Array.Copy(BitConverter.GetBytes(BitConverter.ToInt32(modes, o + 28) - ox), 0, modes, o + 28, 4);
+      Array.Copy(BitConverter.GetBytes(BitConverter.ToInt32(modes, o + 32) - oy), 0, modes, o + 32, 4);
+    }
+    // APPLY | USE_SUPPLIED_DISPLAY_CONFIG | SAVE_TO_DATABASE | ALLOW_CHANGES
+    return SetDisplayConfig(np, paths, nm, modes, 0x80 | 0x20 | 0x200 | 0x400);
+  }
+
+  public static int SetPrimary(string name) {
+    int r = SetPrimaryCcd(name);
+    if (r == 0) return 0;
+    int legacy = SetPrimaryLegacy(name);
+    return legacy == 0 ? 0 : r;
+  }
+
   // Makes `name` the main display. Windows wants the main display at 0,0, so every active display
   // moves by the same offset, which keeps their arrangement.
-  public static int SetPrimary(string name) {
+  static int SetPrimaryLegacy(string name) {
     var all = Attached();
     DISPLAY_DEVICE? target = null;
     foreach (var d in all) if (d.DeviceName == name) target = d;
