@@ -1,6 +1,6 @@
 [package]
 name = "lumen"
-version = "0.5.1"
+version = "0.6.0"
 description = "A console-style game launcher for Windows"
 edition = "2021"
 license = "MIT"
