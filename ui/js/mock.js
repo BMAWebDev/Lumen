@@ -234,7 +234,7 @@ export async function invoke(cmd, args) {
     case 'battery':
       return { percent: 64, charging: false, plugged: false };
     case 'pad_batteries':
-      return [{ kind: 'playstation', percent: 75, charging: false }];
+      return [{ kind: 'playstation', percent: 75, charging: false, connection: 'usb' }, { kind: 'xbox', percent: 26, charging: false, connection: 'bluetooth' }];
     default:
       return null;
   }

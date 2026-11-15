@@ -1935,17 +1935,50 @@ async function tickBattery() {
   box.setAttribute('aria-label', t('battery.label', { percent: b.percent, charging }));
 }
 
-// Controller battery: DualSense/DualShock over HID, Xbox over XInput.
+// Controller battery: DualSense/DualShock over HID, Xbox over XInput or Bluetooth LE. The header shows
+// one battery only: the one of the controller in use right now. Controllers that cannot report a battery
+// (a DualSense over Bluetooth) show nothing, rather than the battery of another controller.
+let padBatts = []; // everything the backend can read, refreshed every few seconds
+let padShown = null; // the markup in the header, to touch the page only when it changes
+let padShowBusy = false;
+
 async function tickPads() {
-  let pads = [];
-  try { pads = (await call('pad_batteries')) || []; } catch { /* no controllers */ }
-  $('#pad-batteries').innerHTML = pads.map((p) => {
-    const cls = p.charging ? ' charging' : p.percent <= 20 ? ' low' : '';
-    const name = t(p.kind === 'playstation' ? 'pad.playstation' : 'pad.xbox');
-    return `<div class="battery pad${cls}" aria-label="${esc(t('battery.padLabel', { name, percent: p.percent, charging: p.charging }))}">
+  try { padBatts = (await call('pad_batteries')) || []; } catch { padBatts = []; }
+  showPadBattery();
+}
+
+/** The battery of the controller in use: matched through the name the browser gives its gamepad. */
+async function showPadBattery() {
+  if (padShowBusy) return;
+  padShowBusy = true;
+  try {
+    const id = inputCtl?.activePadId;
+    let pick = null;
+    if (id && /xbox|xinput|vendor:\s*045e/i.test(id)) {
+      pick = padBatts.find((b) => b.kind === 'xbox') || null;
+    } else if (id && /054c|dualsense|dualshock|playstation|wireless controller/i.test(id)) {
+      const sony = padBatts.filter((b) => b.kind === 'playstation');
+      const sonyPads = [...(navigator.getGamepads?.() || [])].filter((g) => g && /054c|dualsense|dualshock|playstation|wireless controller/i.test(g.id)).length;
+      // Two Sony pads look alike to the browser: the backend says which connection last had input.
+      if (sonyPads > 1) {
+        const via = await call('pad_active_connection').catch(() => null);
+        pick = sony.find((b) => b.connection === via) || null;
+      } else pick = sony[0] || null;
+    }
+    const html = pick ? padBatteryHtml(pick) : '';
+    if (html !== padShown) {
+      padShown = html;
+      $('#pad-batteries').innerHTML = html;
+    }
+  } finally { padShowBusy = false; }
+}
+
+function padBatteryHtml(p) {
+  const cls = p.charging ? ' charging' : p.percent <= 20 ? ' low' : '';
+  const name = t(p.kind === 'playstation' ? 'pad.playstation' : 'pad.xbox');
+  return `<div class="battery pad${cls}" aria-label="${esc(t('battery.padLabel', { name, percent: p.percent, charging: p.charging }))}">
       <span class="pad-icon">${icons.gamepad}</span><span class="batt-icon">${batteryIcon(p.percent, p.charging)}</span><span class="batt-pct">${p.percent}%</span>
     </div>`;
-  }).join('');
 }
 
 // ======================================================================
@@ -2095,6 +2128,7 @@ async function boot() {
   });
   document.addEventListener('visibilitychange', applySettings);
   setInterval(tickControllers, 100); // the Controllers page follows the controller in use, live
+  setInterval(showPadBattery, 250); // so does the battery in the header
 
   if (isTauri) await call('app_ready');
   await nextFrame();

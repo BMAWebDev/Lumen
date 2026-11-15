@@ -10,12 +10,15 @@ pub struct PadBattery {
     pub kind: &'static str,
     pub percent: u8,
     pub charging: bool,
+    /// "usb" or "bluetooth" when known, so the interface can tell controllers of the same kind apart.
+    pub connection: Option<&'static str>,
 }
 
 #[cfg(windows)]
 pub fn batteries() -> Vec<PadBattery> {
     let mut out = sony();
     out.extend(xinput());
+    out.extend(xbox_bluetooth());
     out
 }
 
@@ -107,7 +110,9 @@ fn read_sony(dev: &hidapi::HidDevice, model: Sony, bt: bool) -> Option<PadBatter
     // Over Bluetooth, the controller only sends the short report (0x01) by default, without battery.
     // We do NOT switch it to the full report ourselves (via the calibration report 0x05): that mode
     // stays active until the controller is turned off, and Windows and the Gamepad API in WebView2
-    // don't understand it, so navigating in Lumen would freeze. We only show the battery if another
+    // don't understand it, so navigating in Lumen would freeze (tried and confirmed on a DualSense:
+    // the battery is readable that way, but the controller stops working in Lumen until it is turned
+    // off with PS held for 10 s). We only show the battery if another
     // program (e.g. Steam) has already switched the controller to the full report.
     let status = match (model, bt, buf[0]) {
         (Sony::DualSense, false, 0x01) if n >= 64 => buf[53],
@@ -116,11 +121,11 @@ fn read_sony(dev: &hidapi::HidDevice, model: Sony, bt: bool) -> Option<PadBatter
         (Sony::DualShock4, true, 0x11) if n >= 33 => buf[32],
         _ => return None,
     };
-    parse_sony(model, status)
+    parse_sony(model, status, bt)
 }
 
 #[cfg(windows)]
-fn parse_sony(model: Sony, status: u8) -> Option<PadBattery> {
+fn parse_sony(model: Sony, status: u8, bt: bool) -> Option<PadBattery> {
     let level = status & 0x0f;
     let (percent, charging) = match model {
         Sony::DualSense => match status >> 4 {
@@ -141,7 +146,7 @@ fn parse_sony(model: Sony, status: u8) -> Option<PadBattery> {
             }
         }
     };
-    Some(PadBattery { kind: "playstation", percent: percent.min(100), charging })
+    Some(PadBattery { kind: "playstation", percent: percent.min(100), charging, connection: Some(if bt { "bluetooth" } else { "usb" }) })
 }
 
 /// Watches the PS button on all Sony controllers and calls `on_press` on every
@@ -368,6 +373,33 @@ pub fn watch_xinput_connect(on_connect: impl Fn()) {
 #[cfg(not(windows))]
 pub fn watch_xinput_connect(_on_connect: impl Fn()) {}
 
+/// Xbox controllers over Bluetooth LE don't answer XInput's battery query (it says "disconnected"), but
+/// Windows reads their GATT battery service itself and keeps the level on the device node
+/// (the property Settings > Bluetooth shows). Reading it needs no change to the controller.
+#[cfg(windows)]
+fn xbox_bluetooth() -> Vec<PadBattery> {
+    const SCRIPT: &str = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPDeviceID -like 'BTHLE\DEV_*' -and $_.Name -match 'Xbox' } | ForEach-Object {
+  $id = $_.PNPDeviceID
+  $on = (Get-PnpDeviceProperty -InstanceId $id -KeyName '{83DA6326-97A6-4088-9453-A1923F573B29} 15').Data
+  $level = (Get-PnpDeviceProperty -InstanceId $id -KeyName '{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2').Data
+  if ($on -and $null -ne $level) { [Console]::Out.WriteLine([int]$level) }
+}
+"#;
+    let Ok(out) = crate::platform::powershell_timeout(SCRIPT, 15) else { return Vec::new() };
+    out.lines()
+        .filter_map(|l| l.trim().parse::<u8>().ok())
+        .filter(|p| *p <= 100)
+        .map(|percent| PadBattery { kind: "xbox", percent, charging: false, connection: Some("bluetooth") })
+        .collect()
+}
+
+#[cfg(not(windows))]
+fn xbox_bluetooth() -> Vec<PadBattery> {
+    Vec::new()
+}
+
 #[cfg(windows)]
 fn xinput() -> Vec<PadBattery> {
     const BATTERY_DEVTYPE_GAMEPAD: u8 = 0;
@@ -388,7 +420,33 @@ fn xinput() -> Vec<PadBattery> {
             2 => 65,
             _ => 100,
         };
-        out.push(PadBattery { kind: "xbox", percent, charging: false });
+        out.push(PadBattery { kind: "xbox", percent, charging: false, connection: None });
     }
     out
+}
+
+#[cfg(all(test, windows))]
+mod live {
+    /// Prints what the header would show and how each Sony HID entry is read (run with `--ignored --nocapture`).
+    #[test]
+    #[ignore]
+    fn batteries() {
+        let api = hidapi::HidApi::new().unwrap();
+        for info in api.device_list().filter(|i| i.vendor_id() == super::SONY_VID) {
+            println!("pid={:04x} bus={:?} serial={:?} usage={:04x}:{:04x}", info.product_id(), info.bus_type(), info.serial_number(), info.usage_page(), info.usage());
+            if let (Some(model), Ok(dev)) = (super::sony_model(info.product_id()), info.open_device(&api)) {
+                let mut buf = [0u8; 128];
+                let n = dev.read_timeout(&mut buf, 300).unwrap_or(0);
+                println!("   report id=0x{:02x} len={} -> battery {:?}", buf[0], n, super::read_sony(&dev, model, matches!(info.bus_type(), hidapi::BusType::Bluetooth)).map(|b| b.percent));
+            }
+        }
+        for user in 0..4u32 {
+            let mut info = super::XInputBattery { battery_type: 0, battery_level: 0 };
+            let r = unsafe { super::XInputGetBatteryInformation(user, 0, &mut info) };
+            println!("xinput slot {user}: result={r} type={} level={}", info.battery_type, info.battery_level);
+        }
+        for b in super::batteries() {
+            println!("{} {}% charging={}", b.kind, b.percent, b.charging);
+        }
+    }
 }
