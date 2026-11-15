@@ -14,6 +14,8 @@ pub struct BtDevice {
     pub name: String,
     pub connected: bool,
     pub paired: bool,
+    /// A game controller (by its Bluetooth device class, or by its name when it has none).
+    pub controller: bool,
 }
 
 /// Shared prelude: loads the WinRT types and an `Await` helper for `IAsyncOperation`.
@@ -52,9 +54,20 @@ function Conn($d) {
     $o.ConnectionStatus -eq 'Connected'
   } catch { [bool]$d.Properties['System.Devices.Aep.IsConnected'] }
 }
+# A game controller: Bluetooth class of device "peripheral / gamepad or joystick" (Classic devices), or a
+# telling name (LE devices have no class).
+function IsPad($d) {
+  $a = (($d.Id -split '-')[-1] -replace ':', '').ToLower()
+  try {
+    $cod = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\BTHPORT\Parameters\Devices\$a" -ErrorAction Stop).COD
+    $minor = ($cod -shr 2) -band 0xF
+    if ((($cod -shr 8) -band 0x1F) -eq 5 -and ($minor -eq 1 -or $minor -eq 2)) { return $true }
+  } catch { }
+  [bool]($d.Name -match 'controller|gamepad|dualsense|dualshock|xbox|joy-?con|joystick|8bitdo')
+}
 function Emit($devices) {
   $rows = @($devices | Where-Object { $_.Name } | ForEach-Object {
-    [pscustomobject]@{ id = $_.Id; name = $_.Name; connected = (Conn $_); paired = [bool]$_.Pairing.IsPaired }
+    [pscustomobject]@{ id = $_.Id; name = $_.Name; connected = (Conn $_); paired = [bool]$_.Pairing.IsPaired; controller = (IsPad $_) }
   })
   [Console]::Out.Write('OK:' + (ConvertTo-Json -InputObject $rows -Compress))
 }
@@ -88,6 +101,8 @@ fn parse(json: &str) -> Vec<BtDevice> {
         name: String,
         connected: bool,
         paired: bool,
+        #[serde(default)]
+        controller: bool,
     }
     let mut rows: Vec<Row> = serde_json::from_str(json).unwrap_or_default();
     // A device can answer both as Classic and as LE (same address, two ids): keep the Classic one.
@@ -102,7 +117,7 @@ fn parse(json: &str) -> Vec<BtDevice> {
         .filter(|r| seen.insert(addr(&r.id)))
         .map(|r| {
             let connected = r.connected || connected_addrs.contains(&addr(&r.id));
-            BtDevice { id: r.id, name: r.name, connected, paired: r.paired }
+            BtDevice { id: r.id, name: r.name, connected, paired: r.paired, controller: r.controller }
         })
         .collect();
     v.sort_by(|a, b| b.connected.cmp(&a.connected).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));

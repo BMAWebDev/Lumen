@@ -70,6 +70,7 @@ export function createInput({ onAction, onDevice }) {
   // --- Gamepad
   const held = new Map(); // action -> { next: timestamp }
   let polling = false;
+  let lastPadId = null; // the controller that gave the latest input
 
   function frame(now) {
     const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
@@ -93,6 +94,7 @@ export function createInput({ onAction, onDevice }) {
       const h = held.get(a);
       if (!h) {
         held.set(a, { next: now + REPEAT_DELAY });
+        lastPadId = p.id;
         setDevice('gamepad', padKind(p));
         onAction(a);
       } else if (REPEATING.has(a) && now >= h.next) {
@@ -108,12 +110,19 @@ export function createInput({ onAction, onDevice }) {
     polling = true;
     requestAnimationFrame(frame);
   }
-  window.addEventListener('gamepadconnected', (e) => { setDevice('gamepad', padKind(e.gamepad)); startPolling(); });
+  window.addEventListener('gamepadconnected', (e) => { lastPadId = e.gamepad.id; setDevice('gamepad', padKind(e.gamepad)); startPolling(); });
   window.addEventListener('focus', startPolling);
   // A controller already connected at startup sets the type of the hints from the start.
   const first = navigator.getGamepads ? [...navigator.getGamepads()].find(Boolean) : null;
   if (first) pad = padKind(first);
   startPolling();
 
-  return { get device() { return device; }, get pad() { return pad; }, setDevice };
+  // The `id` of the controller in use: the one that gave the latest input, if it is still connected,
+  // else the first connected one. Null when there is no controller.
+  function activePadId() {
+    const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+    return (pads.find((p) => p.id === lastPadId) || pads[0])?.id ?? null;
+  }
+
+  return { get device() { return device; }, get pad() { return pad; }, get activePadId() { return activePadId(); }, setDevice };
 }

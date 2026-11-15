@@ -15,6 +15,7 @@ mod steam;
 mod store;
 mod uninstall;
 mod update;
+mod usb;
 mod util;
 mod vdf;
 mod xbox;
@@ -432,6 +433,12 @@ fn pad_batteries() -> Vec<pads::PadBattery> {
     pads::batteries()
 }
 
+/// How the controller in use right now is connected ("usb" / "bluetooth"), when it is a Sony one.
+#[tauri::command]
+fn pad_active_connection() -> Option<&'static str> {
+    pads::active_connection()
+}
+
 /// COM enumeration + compiling C# from PowerShell takes ~1 s, so it runs off the main thread.
 #[tauri::command(async)]
 fn audio_outputs() -> Result<Vec<audio::AudioDevice>, String> {
@@ -469,6 +476,12 @@ fn set_primary_display(app: AppHandle, id: String) -> Result<(), String> {
 #[tauri::command(async)]
 fn set_display_mode(mode: String) -> Result<(), String> {
     display::set_mode(&mode)
+}
+
+/// The USB devices plugged into this PC.
+#[tauri::command(async)]
+fn usb_devices() -> Result<Vec<usb::UsbDevice>, String> {
+    usb::connected()
 }
 
 /// The Bluetooth devices paired with this PC.
@@ -677,11 +690,13 @@ fn main() {
             battery,
             clock_24h,
             pad_batteries,
+            pad_active_connection,
             audio_outputs,
             set_audio_output,
             video_state,
             set_primary_display,
             set_display_mode,
+            usb_devices,
             bluetooth_paired,
             bluetooth_scan,
             bluetooth_pair,

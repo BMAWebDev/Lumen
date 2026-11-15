@@ -104,8 +104,8 @@ const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music:
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
-let btPaired = [{ id: 'bt1', name: 'DualSense Wireless Controller', connected: true, paired: true }, { id: 'bt2', name: 'Razer Kraken BT', connected: false, paired: true }];
-const btNearby = [{ id: 'bt3', name: 'Xbox Wireless Controller', connected: false, paired: false }, { id: 'bt4', name: 'JBL Flip 6', connected: false, paired: false }];
+let btPaired = [{ id: 'bt1', name: 'DualSense Wireless Controller', connected: true, paired: true, controller: true }, { id: 'bt2', name: 'Razer Kraken BT', connected: false, paired: true, controller: false }];
+const btNearby = [{ id: 'bt3', name: 'Xbox Wireless Controller', connected: false, paired: false, controller: true }, { id: 'bt4', name: 'JBL Flip 6', connected: false, paired: false }];
 let video = { mode: 'extend', displays: [{ id: '\\\\.\\DISPLAY1', name: 'DELL U2723QE', width: 3840, height: 2160, primary: true }, { id: '\\\\.\\DISPLAY2', name: 'LG TV', width: 1920, height: 1080, primary: false }] };
 let favorites = games.slice(0, 4).map((g) => g.id);
 
@@ -198,6 +198,10 @@ export async function invoke(cmd, args) {
     case 'set_display_mode':
       video.mode = args.mode;
       return;
+    case 'pad_active_connection':
+      return globalThis.__padVia || 'bluetooth'; // tests can switch it
+    case 'usb_devices':
+      return [{ id: 'USB\\VID_054C&PID_0CE6\\1', name: 'DualSense Wireless Controller' }];
     case 'bluetooth_paired':
       return btPaired.map((d) => ({ ...d }));
     case 'bluetooth_scan':

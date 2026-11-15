@@ -24,6 +24,25 @@ pub fn batteries() -> Vec<PadBattery> {
     Vec::new()
 }
 
+/// The connection ("usb" or "bluetooth") of the Sony controller that last had a button pressed or a stick
+/// pushed. Two controllers of the same model look identical to the webview, so this is how the interface
+/// tells which one is actually being used.
+#[cfg(windows)]
+static LAST_ACTIVE: std::sync::Mutex<Option<(bool, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+#[cfg(windows)]
+pub fn active_connection() -> Option<&'static str> {
+    // A controller left alone for a while is no longer "the one in use".
+    const FRESH: std::time::Duration = std::time::Duration::from_secs(600);
+    let (bt, at) = (*LAST_ACTIVE.lock().ok()?)?;
+    (at.elapsed() < FRESH).then_some(if bt { "bluetooth" } else { "usb" })
+}
+
+#[cfg(not(windows))]
+pub fn active_connection() -> Option<&'static str> {
+    None
+}
+
 // ---------------------------------------------------------------------------
 // DualSense and DualShock 4 (HID)
 // ---------------------------------------------------------------------------
@@ -211,6 +230,11 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
             match p.dev.read_timeout(&mut buf, 0) {
                 Ok(0) => break true,
                 Ok(n) => {
+                    if engaged(p.model, p.bt, &buf[..n]) {
+                        if let Ok(mut last) = LAST_ACTIVE.lock() {
+                            *last = Some((p.bt, Instant::now()));
+                        }
+                    }
                     if let Some((down, options)) = ps_options(p.model, p.bt, &buf[..n]) {
                         if down && !p.down {
                             on_press();
@@ -261,6 +285,24 @@ fn bridge_release(dev: &hidapi::HidDevice) -> bool {
     cmd[0] = 0xF6;
     cmd[1] = 0x11;
     dev.send_feature_report(&cmd).is_ok()
+}
+
+/// Whether the sticks are pushed or any button is held in an input report. Gyro and counters are ignored,
+/// so a controller lying still does not count as in use.
+#[cfg(windows)]
+fn engaged(model: Sony, bt: bool, r: &[u8]) -> bool {
+    // (first stick byte, first button byte, mask of the used bits in the last button byte)
+    let (stick, btn, last) = match (model, bt, r.first().copied()) {
+        (Sony::DualSense, false, Some(0x01)) => (1, 8, 0x07),
+        (Sony::DualSense, true, Some(0x31)) => (2, 9, 0x07),
+        (Sony::DualShock4, true, Some(0x11)) => (3, 8, 0x03),
+        (_, _, Some(0x01)) => (1, 5, 0x03),
+        _ => return false,
+    };
+    let Some(b) = r.get(btn..btn + 3) else { return false };
+    let Some(sticks) = r.get(stick..stick + 4) else { return false };
+    let hat = b[0] & 0x0f; // 8 = D-pad released
+    hat < 8 || b[0] & 0xf0 != 0 || b[1] != 0 || b[2] & last != 0 || sticks.iter().any(|v| v.abs_diff(128) > 48)
 }
 
 /// The state of the PS and Options buttons from an input report. PS is bit 0 of the third

@@ -17,6 +17,7 @@ const el = (tag, cls, html) => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+let inputCtl = null; // the input controller (keyboard, mouse, gamepads), set at startup
 let remPx = 10;
 const measureRem = () => { remPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 10; };
 
@@ -918,7 +919,7 @@ function settingsCats() {
     },
     { id: 'audio', label: t('set.audio'), icon: icons.speaker, load: audioLoad },
     { id: 'video', label: t('set.video'), icon: icons.monitor, load: videoLoad },
-    { id: 'bluetooth', label: t('bt.title'), icon: icons.bluetooth, load: bluetoothLoad },
+    { id: 'controllers', label: t('controllers.title'), icon: icons.gamepad, load: controllersLoad },
     {
       id: 'appearance', label: t('set.appearance'), icon: icons.palette,
       load: () => ({
@@ -931,7 +932,7 @@ function settingsCats() {
   ];
 }
 
-/** Opens the Settings page, optionally on one category (`general`, `library`, `audio`, `bluetooth`, `appearance`). */
+/** Opens the Settings page, optionally on one category (`general`, `library`, `audio`, `video`, `controllers`, `appearance`). */
 function openSettings(catId) {
   closeAll();
   const idx = settingsCats().findIndex((c) => c.id === catId);
@@ -1190,18 +1191,98 @@ async function changeDisplayMode(mode) {
   reloadVideo();
 }
 
-// Bluetooth: paired devices, adding a new one (pairing) and removing one (unpairing).
-async function bluetoothLoad() {
-  let devices = [];
-  try { devices = (await cachedCall('bluetooth', 'bluetooth_paired', refreshCat('bluetooth'))) || []; } catch (e) { return { items: [], note: String(e) }; }
-  const items = devices.map((d) => ({
+// Controllers: the ones plugged in over USB (read only), then the Bluetooth ones: paired controllers,
+// adding a new device (pairing) and removing one (unpairing). Other devices (headsets, mice...) are not listed.
+async function controllersLoad() {
+  // Both lists are fetched at once; a failure in one must not hide the other.
+  const [usbRes, btRes] = await Promise.allSettled([
+    cachedCall('usb', 'usb_devices', refreshCat('controllers')),
+    cachedCall('bluetooth', 'bluetooth_paired', refreshCat('controllers')),
+  ]);
+  const usb = usbRes.status === 'fulfilled' ? usbRes.value || [] : [];
+  const devices = btRes.status === 'fulfilled' ? (btRes.value || []).filter((d) => d.controller) : [];
+  const { usbIn, btIn } = await padsInUse(usb, devices);
+  const items = usb.map((d, i) => ({
+    group: i === 0 ? t('usb.title') : '',
+    label: d.name,
+    desc: t('usb.connected'),
+    inUse: usbIn[i],
+    pad: { usb: d },
+  }));
+  let note = '';
+  if (usbRes.status === 'rejected') note = String(usbRes.reason);
+  if (btRes.status === 'rejected') {
+    items.push({ group: t('bt.title'), label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+    return { items, note: String(btRes.reason) };
+  }
+  devices.forEach((d, i) => items.push({
+    group: i === 0 ? t('bt.title') : '',
     label: btName(d),
     desc: d.connected ? t('bt.connected') : t('bt.paired'),
-    inUse: d.connected, // highlighted in green
+    inUse: btIn[i],
+    pad: { bt: d },
     action: () => openBluetoothDevice(d),
   }));
-  items.push({ label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
-  return { items, note: devices.length ? t('bt.note') : t('bt.none') };
+  items.push({ group: devices.length ? '' : t('bt.title'), label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+  return { items, note: note || (devices.length ? t('bt.note') : t('bt.none')) };
+}
+
+/**
+ * Which listed controllers are the one in use. Only that one is green. A DualSense on USB and another on
+ * Bluetooth look the same to the browser, so when both could match, the backend says which connection
+ * last had input.
+ */
+async function padsInUse(usb, bt) {
+  const usbHit = usb.map((d) => matchesPad(d, false));
+  const btHit = bt.map((d) => d.connected && matchesPad(d, true));
+  const both = usbHit.some(Boolean) && btHit.some(Boolean);
+  const via = both ? await call('pad_active_connection').catch(() => null) : null;
+  return {
+    usbIn: usbHit.map((h) => h && (!both || via === 'usb')),
+    btIn: btHit.map((h) => h && (!both || via === 'bluetooth')),
+  };
+}
+
+/**
+ * Keeps the Controllers page live while it is open: the green marker follows the controller in use within a
+ * tenth of a second (it only toggles a class, so the list and the focus stay put), and the USB / Bluetooth lists are asked again every
+ * few seconds (the page redraws itself when they changed).
+ */
+let padLiveBusy = false;
+let padListsAt = 0; // when the USB / Bluetooth lists were last asked again
+async function tickControllers() {
+  if (padLiveBusy || S.view !== 'settings' || settingsCats()[S.setCat]?.id !== 'controllers' || !S.setItems.some((it) => it.pad)) return;
+  padLiveBusy = true;
+  try {
+    const rows = S.setItems.map((it, i) => ({ it, li: S.setEls[i] })).filter((r) => r.it.pad);
+    const usb = rows.filter((r) => r.it.pad.usb);
+    const bt = rows.filter((r) => r.it.pad.bt);
+    const { usbIn, btIn } = await padsInUse(usb.map((r) => r.it.pad.usb), bt.map((r) => r.it.pad.bt));
+    usb.forEach((r, i) => { r.it.inUse = usbIn[i]; r.li?.classList.toggle('in-use', usbIn[i]); });
+    bt.forEach((r, i) => { r.it.inUse = btIn[i]; r.li?.classList.toggle('in-use', btIn[i]); });
+    if (!stack.length && Date.now() - padListsAt > 6000) {
+      padListsAt = Date.now();
+      cachedCall('usb', 'usb_devices', refreshCat('controllers')).catch(() => {});
+      cachedCall('bluetooth', 'bluetooth_paired', refreshCat('controllers')).catch(() => {});
+    }
+  } finally { padLiveBusy = false; }
+}
+
+/**
+ * Whether `d` (a USB or Bluetooth device) looks like the gamepad the browser says is in use. The browser names a gamepad
+ * like "DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)"; a USB device is matched
+ * by that vendor/product, a Bluetooth one (whose ids carry no vendor) by its name.
+ */
+function matchesPad(d, bluetooth) {
+  const id = inputCtl?.activePadId;
+  if (!id) return false;
+  if (bluetooth) {
+    const name = id.replace(/\s*\(.*$/, '').trim().toLowerCase();
+    const dev = d.name.trim().toLowerCase();
+    return !!name && (dev === name || dev.includes(name) || name.includes(dev));
+  }
+  const m = /Vendor:\s*([0-9a-f]{4})\s*Product:\s*([0-9a-f]{4})/i.exec(id);
+  return !!m && d.id.toUpperCase().includes(`VID_${m[1]}&PID_${m[2]}`.toUpperCase());
 }
 
 /** The name shown for a device: the one the user gave it, else the Windows one. */
@@ -1929,6 +2010,7 @@ async function boot() {
     onAction,
     onDevice: (d, pad) => { S.device = d; S.pad = pad; document.body.classList.toggle('hide-cursor', d === 'gamepad'); updateHints(); },
   });
+  inputCtl = input;
   S.device = input.device;
   S.pad = input.pad;
 
@@ -2009,6 +2091,7 @@ async function boot() {
     applySettings();
   });
   document.addEventListener('visibilitychange', applySettings);
+  setInterval(tickControllers, 100); // the Controllers page follows the controller in use, live
 
   if (isTauri) await call('app_ready');
   await nextFrame();
@@ -2017,7 +2100,7 @@ async function boot() {
   updateHints();
   rescan(false);
   // Warm the slow menus once Lumen is up, so they open instantly later (staggered to keep the start light).
-  setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); loadPlatforms(); }, 1500);
+  setTimeout(() => { cachedCall('bluetooth', 'bluetooth_paired').catch(() => {}); cachedCall('usb', 'usb_devices').catch(() => {}); loadPlatforms(); }, 1500);
   setTimeout(() => cachedCall('audio', 'audio_outputs').catch(() => {}), 3500);
   setTimeout(() => cachedCall('video', 'video_state').catch(() => {}), 5500);
   // Once a while after start, and then every few hours if Lumen stays open (it is meant to run for days).
