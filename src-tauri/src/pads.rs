@@ -149,14 +149,81 @@ fn parse_sony(model: Sony, status: u8, bt: bool) -> Option<PadBattery> {
     Some(PadBattery { kind: "playstation", percent: percent.min(100), charging, connection: Some(if bt { "bluetooth" } else { "usb" }) })
 }
 
+/// What Lumen needs from a DualSense over Bluetooth, read straight from its HID reports (the webview cannot
+/// read these controllers once they send the full report). `buttons` has one bit per button, numbered like
+/// the browser's "standard" Gamepad mapping (0 cross, 1 circle, 2 square, 3 triangle, 4 L1, 5 R1, 6 L2, 7 R2,
+/// 8 create, 9 options, 10 L3, 11 R3, 12-15 the D-pad up / down / left / right; the PS button is left to
+/// `watch`), and `x` / `y` are the left stick pushed far enough: -1, 0 or 1.
+#[derive(Clone, Serialize, PartialEq, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct PadInput {
+    /// The controller's Bluetooth address, which is also its HID serial number.
+    pub serial: String,
+    pub connected: bool,
+    pub buttons: u32,
+    pub x: i8,
+    pub y: i8,
+    /// The battery from the same report (percent, charging), so it shows up the moment the controller does.
+    pub battery: Option<(u8, bool)>,
+}
+
+/// Decodes the full input report (0x31) of a DualSense over Bluetooth: the sticks are bytes 2-5, the
+/// buttons bytes 9-11 (D-pad as a hat in the low nibble of byte 9), the battery byte 54.
+#[cfg(windows)]
+fn decode_dualsense_bt(r: &[u8]) -> Option<(u32, i8, i8, Option<(u8, bool)>)> {
+    if r.len() < 12 || r[0] != 0x31 {
+        return None;
+    }
+    let (b9, b10) = (r[9], r[10]);
+    let mut m = 0u32;
+    let mut set = |bit: u32, on: bool| {
+        if on {
+            m |= 1 << bit;
+        }
+    };
+    set(0, b9 & 0x20 != 0); // cross
+    set(1, b9 & 0x40 != 0); // circle
+    set(2, b9 & 0x10 != 0); // square
+    set(3, b9 & 0x80 != 0); // triangle
+    set(4, b10 & 0x01 != 0); // L1
+    set(5, b10 & 0x02 != 0); // R1
+    set(6, b10 & 0x04 != 0); // L2
+    set(7, b10 & 0x08 != 0); // R2
+    set(8, b10 & 0x10 != 0); // create
+    set(9, b10 & 0x20 != 0); // options
+    set(10, b10 & 0x40 != 0); // L3
+    set(11, b10 & 0x80 != 0); // R3
+    let hat = b9 & 0x0f; // 0 = up, then clockwise; 8 = released
+    set(12, matches!(hat, 0 | 1 | 7));
+    set(13, matches!(hat, 3 | 4 | 5));
+    set(14, matches!(hat, 5 | 6 | 7));
+    set(15, matches!(hat, 1 | 2 | 3));
+    // 128 is the centre; the browser treats more than 0.55 of the way as a push.
+    let axis = |v: u8| -> i8 {
+        let d = i16::from(v) - 128;
+        if d > 70 { 1 } else if d < -70 { -1 } else { 0 }
+    };
+    let battery = r.get(54).and_then(|b| parse_sony(Sony::DualSense, *b, true)).map(|b| (b.percent, b.charging));
+    Some((m, axis(r[2]), axis(r[3]), battery))
+}
+
+/// Asks a DualSense over Bluetooth for its calibration data. That is what makes it switch from the short
+/// report to the full one (0x31), which carries the battery. It stays that way until it is turned off.
+#[cfg(windows)]
+fn enable_full_report(dev: &hidapi::HidDevice) {
+    let mut cal = [0u8; 41];
+    cal[0] = 0x05;
+    let _ = dev.get_feature_report(&mut cal);
+}
+
 /// Watches the PS button on all Sony controllers and calls `on_press` on every
 /// press. It runs on its own thread, forever; it also works with a game in front,
 /// because Windows lets several applications read the same controller.
 /// When a DS5 Bridge dongle capable of handoff shows up, it asks it to give the controller
 /// up to the PC's Bluetooth and calls `on_handoff`.
 #[cfg(windows)]
-pub fn watch_ps_button(on_press: impl Fn(), on_handoff: impl Fn()) {
-    watch(on_press, || {}, Some(&on_handoff), || {});
+pub fn watch_ps_button(on_press: impl Fn(), on_handoff: impl Fn(), on_input: impl Fn(PadInput)) {
+    watch(on_press, || {}, Some(&on_handoff), || {}, Some(&on_input));
 }
 
 /// How long the PS + Options combination has to be held to start Lumen.
@@ -169,11 +236,17 @@ const COMBO_HOLD: std::time::Duration = std::time::Duration::from_millis(1200);
 /// Used by the process that waits for them while Lumen is closed.
 #[cfg(windows)]
 pub fn watch_combo(on_combo: impl Fn(), on_connect: impl Fn()) {
-    watch(|| {}, on_combo, None, on_connect);
+    watch(|| {}, on_combo, None, on_connect, None);
 }
 
 #[cfg(windows)]
-fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>, on_connect: impl Fn()) {
+fn watch(
+    on_press: impl Fn(),
+    on_combo: impl Fn(),
+    on_handoff: Option<&dyn Fn()>,
+    on_connect: impl Fn(),
+    on_input: Option<&dyn Fn(PadInput)>,
+) {
     use std::time::{Duration, Instant};
 
     struct Pad {
@@ -181,6 +254,10 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
         path: std::ffi::CString,
         model: Sony,
         bt: bool,
+        /// Bluetooth address / serial, to tell controllers apart in the events.
+        serial: String,
+        /// What was last sent to the interface, so only changes are sent.
+        sent: Option<(u32, i8, i8, Option<(u8, bool)>)>,
         down: bool,
         /// The moment PS and Options were pressed together.
         combo_since: Option<Instant>,
@@ -191,8 +268,8 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
     let mut last_scan: Option<Instant> = None;
     let mut buf = [0u8; 128];
     loop {
-        // New controllers show up on a re-enumeration, every 3 seconds.
-        if last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(3)) {
+        // New controllers show up on a re-enumeration, every second.
+        if last_scan.is_none_or(|t| t.elapsed() > Duration::from_secs(1)) {
             let first_scan = last_scan.is_none();
             last_scan = Some(Instant::now());
             if api.refresh_devices().is_ok() {
@@ -210,11 +287,23 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
                                 on_handoff();
                             }
                         }
+                        let serial = info.serial_number().unwrap_or_default().to_owned();
+                        // Only the running Lumen (the one that listens to the input events) reads these
+                        // controllers itself; the background process that waits for them leaves them alone.
+                        let own_input = on_input.is_some() && bt && model == Sony::DualSense;
+                        if own_input {
+                            enable_full_report(&dev);
+                            if let Some(f) = on_input {
+                                f(PadInput { serial: serial.clone(), connected: true, buttons: 0, x: 0, y: 0, battery: None });
+                            }
+                        }
                         pads.push(Pad {
                             dev,
                             path: info.path().to_owned(),
                             model,
                             bt,
+                            serial,
+                            sent: own_input.then_some((0, 0, 0, None)),
                             down: false,
                             combo_since: None,
                             combo_fired: false,
@@ -240,6 +329,14 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
                             *last = Some((p.bt, Instant::now()));
                         }
                     }
+                    if let (Some(f), Some(last)) = (on_input, p.sent) {
+                        if let Some(now) = decode_dualsense_bt(&buf[..n]) {
+                            if now != last {
+                                p.sent = Some(now);
+                                f(PadInput { serial: p.serial.clone(), connected: true, buttons: now.0, x: now.1, y: now.2, battery: now.3 });
+                            }
+                        }
+                    }
                     if let Some((down, options)) = ps_options(p.model, p.bt, &buf[..n]) {
                         if down && !p.down {
                             on_press();
@@ -253,7 +350,13 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
                         }
                     }
                 }
-                Err(_) => break false, // controller disconnected
+                Err(_) => {
+                    // controller disconnected
+                    if let (Some(f), Some(_)) = (on_input, p.sent) {
+                        f(PadInput { serial: p.serial.clone(), connected: false, buttons: 0, x: 0, y: 0, battery: None });
+                    }
+                    break false;
+                }
             }
         });
         for p in &mut pads {
@@ -267,7 +370,7 @@ fn watch(on_press: impl Fn(), on_combo: impl Fn(), on_handoff: Option<&dyn Fn()>
 }
 
 #[cfg(not(windows))]
-pub fn watch_ps_button(_on_press: impl Fn(), _on_handoff: impl Fn()) {}
+pub fn watch_ps_button(_on_press: impl Fn(), _on_handoff: impl Fn(), _on_input: impl Fn(PadInput)) {}
 
 #[cfg(not(windows))]
 pub fn watch_combo(_on_combo: impl Fn(), _on_connect: impl Fn()) {}
@@ -448,5 +551,61 @@ mod live {
         for b in super::batteries() {
             println!("{} {}% charging={}", b.kind, b.percent, b.charging);
         }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    fn report() -> [u8; 78] {
+        let mut r = [0u8; 78];
+        r[0] = 0x31;
+        r[1] = 0x01;
+        r[2..6].copy_from_slice(&[128, 128, 128, 128]); // sticks centred
+        r[9] = 0x08; // D-pad released
+        r
+    }
+
+    #[test]
+    fn an_idle_report_has_nothing_pressed() {
+        assert_eq!(decode_dualsense_bt(&report()), Some((0, 0, 0, Some((5, false)))));
+    }
+
+    #[test]
+    fn buttons_hat_and_stick_are_decoded() {
+        let mut r = report();
+        r[9] = 0x20 | 0x01; // cross + D-pad up-right
+        r[10] = 0x01 | 0x20; // L1 + options
+        r[2] = 255; // stick right
+        r[3] = 0; // stick up
+        let (m, x, y, _) = decode_dualsense_bt(&r).unwrap();
+        // cross, L1, options, D-pad up, D-pad right
+        assert_eq!(m, 1 << 0 | 1 << 4 | 1 << 9 | 1 << 12 | 1 << 15);
+        assert_eq!((x, y), (1, -1));
+    }
+
+    #[test]
+    fn a_small_stick_push_is_not_a_direction() {
+        let mut r = report();
+        r[2] = 128 + 40;
+        assert_eq!(decode_dualsense_bt(&r), Some((0, 0, 0, Some((5, false)))));
+    }
+
+    #[test]
+    fn the_battery_comes_from_byte_54() {
+        let mut r = report();
+        r[54] = 0x12; // charging, level 2
+        assert_eq!(decode_dualsense_bt(&r).unwrap().3, Some((25, true)));
+        r[54] = 0x2a; // fully charged
+        assert_eq!(decode_dualsense_bt(&r).unwrap().3, Some((100, false)));
+    }
+
+    #[test]
+    fn other_reports_are_ignored() {
+        let mut r = report();
+        r[0] = 0x01;
+        assert_eq!(decode_dualsense_bt(&r), None);
+        assert_eq!(decode_dualsense_bt(&[0x31, 0, 0]), None);
     }
 }

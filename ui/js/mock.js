@@ -242,3 +242,4 @@ export async function invoke(cmd, args) {
 
 // Lets you simulate the Guide button from the console: lumenGuide()
 window.lumenGuide = () => emit('guide', null);
+window.lumenPadInput = (p) => emit('pad-input', p); // simulates a controller read over HID by the backend

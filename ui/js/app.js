@@ -1939,6 +1939,7 @@ async function tickBattery() {
 // one battery only: the one of the controller in use right now. Controllers that cannot report a battery
 // (a DualSense over Bluetooth) show nothing, rather than the battery of another controller.
 let padBatts = []; // everything the backend can read, refreshed every few seconds
+const hidBatts = new Map(); // batteries of the controllers read over HID, pushed with their input, by serial
 let padShown = null; // the markup in the header, to touch the page only when it changes
 let padShowBusy = false;
 
@@ -1957,13 +1958,12 @@ async function showPadBattery() {
     if (id && /xbox|xinput|vendor:\s*045e/i.test(id)) {
       pick = padBatts.find((b) => b.kind === 'xbox') || null;
     } else if (id && /054c|dualsense|dualshock|playstation|wireless controller/i.test(id)) {
-      const sony = padBatts.filter((b) => b.kind === 'playstation');
-      const sonyPads = [...(navigator.getGamepads?.() || [])].filter((g) => g && /054c|dualsense|dualshock|playstation|wireless controller/i.test(g.id)).length;
+      // A DualSense over Bluetooth is read over HID and reports its own battery as it changes; the polled
+      // list may still hold a stale entry for it, so the pushed one replaces it.
+      const sony = [...padBatts.filter((b) => b.kind === 'playstation' && !(b.connection === 'bluetooth' && hidBatts.size)), ...hidBatts.values()];
       // Two Sony pads look alike to the browser: the backend says which connection last had input.
-      if (sonyPads > 1) {
-        const via = await call('pad_active_connection').catch(() => null);
-        pick = sony.find((b) => b.connection === via) || null;
-      } else pick = sony[0] || null;
+      const via = await call('pad_active_connection').catch(() => null);
+      pick = sony.find((b) => b.connection === via) || (!via && sony.length === 1 ? sony[0] : null);
     }
     const html = pick ? padBatteryHtml(pick) : '';
     if (html !== padShown) {
@@ -2101,6 +2101,14 @@ async function boot() {
   });
   // The DS5 Bridge dongle gave up the controller: the next PS press connects it to the PC.
   on('pad-handoff', () => toast(t('pad.handoff')));
+  // A controller read over HID has no gamepadconnected event of its own.
+  on('pad-input', (e) => {
+    input.hidPad(e);
+    // Its battery comes in the same report, so the header does not wait for the next reading.
+    if (e.connected && e.battery) hidBatts.set(e.serial, { kind: 'playstation', percent: e.battery[0], charging: e.battery[1], connection: 'bluetooth' });
+    else if (!e.connected) hidBatts.delete(e.serial);
+    showPadBattery();
+  });
   on('game-started', ({ id }) => {
     S.running = { id, started: true };
     launchOverlay?.box.classList.add('started');

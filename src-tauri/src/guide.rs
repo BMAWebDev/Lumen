@@ -16,9 +16,15 @@ pub fn start(app: AppHandle) {
     std::thread::spawn(move || run(xinput));
     std::thread::spawn(move || {
         use tauri::Emitter;
-        crate::pads::watch_ps_button(|| fire(&app), || {
-            let _ = app.emit("pad-handoff", ());
-        })
+        crate::pads::watch_ps_button(
+            || fire(&app),
+            || {
+                let _ = app.emit("pad-handoff", ());
+            },
+            |input| {
+                let _ = app.emit("pad-input", input);
+            },
+        )
     });
 }
 

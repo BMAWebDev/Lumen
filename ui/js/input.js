@@ -27,6 +27,9 @@ const REPEATING = new Set([...DIRS, 'delete']); // held buttons that keep firing
 // Sony controllers (DualShock 4, DualSense) have vendor ID 054c; WebView2 puts it in `id`.
 const SONY = /054c|dualsense|dualshock|playstation|wireless controller/i;
 const padKind = (p) => (SONY.test(p?.id || '') ? 'playstation' : 'xbox');
+// A DualSense over Bluetooth sends the full report, which the webview cannot read, so the backend reads it
+// and sends its buttons as events; they get this name so everything that matches gamepads by name still works.
+const HID_DUALSENSE_ID = 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)';
 const REPEAT_DELAY = 360;
 const REPEAT_RATE = 95;
 const STICK = 0.55;
@@ -72,8 +75,22 @@ export function createInput({ onAction, onDevice }) {
   let polling = false;
   let lastPadId = null; // the controller that gave the latest input
 
+  // Controllers the backend reads over HID, by serial number; shaped like Gamepad objects for `frame`.
+  const hidPads = new Map();
+  const allPads = () => [...(navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : []), ...hidPads.values()];
+  /** An event from the backend with the state of a controller it reads itself. */
+  function hidPad(e) {
+    if (!e.connected) { hidPads.delete(e.serial); held.clear(); return; }
+    hidPads.set(e.serial, {
+      id: HID_DUALSENSE_ID,
+      buttons: Array.from({ length: 18 }, (_, i) => ({ pressed: !!((e.buttons >> i) & 1) })),
+      axes: [e.x, e.y],
+    });
+    startPolling();
+  }
+
   function frame(now) {
-    const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+    const pads = allPads();
     if (!pads.length) { polling = false; held.clear(); return; }
     const active = new Map(); // action -> the gamepad that triggered it
     for (const p of pads) {
@@ -120,9 +137,9 @@ export function createInput({ onAction, onDevice }) {
   // The `id` of the controller in use: the one that gave the latest input, if it is still connected,
   // else the first connected one. Null when there is no controller.
   function activePadId() {
-    const pads = navigator.getGamepads ? [...navigator.getGamepads()].filter(Boolean) : [];
+    const pads = allPads();
     return (pads.find((p) => p.id === lastPadId) || pads[0])?.id ?? null;
   }
 
-  return { get device() { return device; }, get pad() { return pad; }, get activePadId() { return activePadId(); }, setDevice };
+  return { get device() { return device; }, get pad() { return pad; }, get activePadId() { return activePadId(); }, setDevice, hidPad };
 }
