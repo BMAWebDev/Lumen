@@ -1276,6 +1276,9 @@ async function tickControllers() {
 function matchesPad(d, bluetooth) {
   const id = inputCtl?.activePadId;
   if (!id) return false;
+  // Xbox controllers reach the browser through XInput, named "Xbox 360 Controller (XInput STANDARD GAMEPAD)"
+  // whatever the model, or by Microsoft's vendor id (045e); Windows calls the real one "Xbox Wireless Controller".
+  if (/xbox|xinput|vendor:\s*045e/i.test(id)) return /xbox/i.test(d.name) || (!bluetooth && /VID_045E/i.test(d.id));
   if (bluetooth) {
     const name = id.replace(/\s*\(.*$/, '').trim().toLowerCase();
     const dev = d.name.trim().toLowerCase();
