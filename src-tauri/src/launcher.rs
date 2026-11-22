@@ -106,6 +106,34 @@ static PAUSED: Mutex<Option<(Vec<u32>, Instant)>> = Mutex::new(None);
 /// For how long after the pause we ignore losing focus: bringing the window to the front can shake it.
 const PAUSE_SETTLE: Duration = Duration::from_millis(800);
 
+/// The process of the window that was in front when the Lumen menu opened. Some games
+/// (Minecraft) run from outside their install folder, so `procs_under` cannot see them.
+static GAME_PID: Mutex<Option<u32>> = Mutex::new(None);
+
+/// Called right before Lumen takes the foreground: if a game is running and its window is
+/// the one in front, we remember its process.
+pub fn remember_foreground(app: &AppHandle) {
+    let running = app.state::<AppState>().inner.lock().is_ok_and(|s| s.running.as_ref().is_some_and(|r| r.started));
+    let Some(pid) = platform::foreground_pid().filter(|_| running) else { return };
+    if pid == std::process::id() {
+        return;
+    }
+    if let Ok(mut g) = GAME_PID.lock() {
+        *g = Some(pid);
+    }
+}
+
+/// The game processes for focusing its window: the ones under its folder plus the remembered foreground one.
+fn game_pids(dir: &str) -> Vec<u32> {
+    let mut pids = platform::procs_under(dir);
+    if let Some(pid) = GAME_PID.lock().ok().and_then(|g| *g) {
+        if !pids.contains(&pid) {
+            pids.push(pid);
+        }
+    }
+    pids
+}
+
 /// Freezes the running game, so presses in the Lumen menu don't reach it too.
 pub fn pause(app: &AppHandle) {
     let state = app.state::<AppState>();
@@ -155,7 +183,7 @@ pub fn resume(app: &AppHandle) -> Result<(), String> {
         let r = s.running.as_ref().filter(|r| r.started).ok_or(crate::t!("No game is running.", "Niciun joc nu rulează."))?;
         s.games.iter().find(|g| g.id == r.id).map(|g| g.install_dir.clone()).ok_or(crate::t!("The game was not found.", "Jocul nu a fost găsit."))?
     };
-    if !platform::focus_window_of(&platform::procs_under(&dir)) {
+    if !platform::focus_window_of(&game_pids(&dir)) {
         return Err(crate::t!("The game window was not found.", "Fereastra jocului nu a fost găsită.").into());
     }
     if let Some(w) = app.get_webview_window("main") {
@@ -171,6 +199,9 @@ fn is_current(app: &AppHandle, id: &str) -> bool {
 }
 
 fn clear(app: &AppHandle, id: &str) {
+    if let Ok(mut g) = GAME_PID.lock() {
+        *g = None;
+    }
     let state = app.state::<AppState>();
     if let Ok(mut s) = state.inner.lock() {
         if s.running.as_ref().is_some_and(|r| r.id == id) {

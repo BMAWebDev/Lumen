@@ -48,6 +48,9 @@ fn fire(app: &AppHandle) {
     if crate::platforms::in_front() {
         return;
     }
+    // Remember the window in front before Lumen covers it: it is the game, even when it
+    // runs from outside the game folder (Minecraft's launcher closes and java takes over).
+    crate::launcher::remember_foreground(app);
     if let Some(w) = app.get_webview_window("main") {
         crate::platform::bring_to_front(&w);
     }

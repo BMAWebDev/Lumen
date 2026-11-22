@@ -318,6 +318,23 @@ pub fn foreground_exes() -> Vec<String> {
     Vec::new()
 }
 
+/// The process owning the window currently in front.
+#[cfg(windows)]
+pub fn foreground_pid() -> Option<u32> {
+    let hwnd = unsafe { win::GetForegroundWindow() };
+    if hwnd == 0 {
+        return None;
+    }
+    let mut pid = 0u32;
+    unsafe { win::GetWindowThreadProcessId(hwnd, &mut pid) };
+    (pid != 0).then_some(pid)
+}
+
+#[cfg(not(windows))]
+pub fn foreground_pid() -> Option<u32> {
+    None
+}
+
 /// The real folder behind junctions. Xbox games moved to another disk have
 /// `C:\Program Files\WindowsApps\…` → `D:\WindowsApps\…` → `D:\Games\<game>\Content`,
 /// and Windows reports the processes with the final path.
