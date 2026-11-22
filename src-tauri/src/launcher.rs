@@ -134,6 +134,19 @@ fn game_pids(dir: &str) -> Vec<u32> {
     pids
 }
 
+/// Minimizes the window of the running game, so the desktop shows instead of it.
+pub fn minimize_game(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let dir = {
+        let Ok(s) = state.inner.lock() else { return };
+        let Some(r) = s.running.as_ref().filter(|r| r.started) else { return };
+        s.games.iter().find(|g| g.id == r.id).map(|g| g.install_dir.clone())
+    };
+    if let Some(dir) = dir {
+        platform::minimize_window_of(&game_pids(&dir));
+    }
+}
+
 /// Freezes the running game, so presses in the Lumen menu don't reach it too.
 pub fn pause(app: &AppHandle) {
     let state = app.state::<AppState>();

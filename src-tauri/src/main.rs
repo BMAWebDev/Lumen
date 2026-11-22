@@ -3,6 +3,7 @@
 mod art;
 mod audio;
 mod bluetooth;
+mod desktop;
 mod display;
 mod guide;
 mod launcher;
@@ -253,12 +254,90 @@ fn set_setting(state: State<'_, AppState>, key: String, value: bool) -> Result<S
             "onlineArt" => s.settings.online_art = value,
             "reduceMotion" => s.settings.reduce_motion = value,
             "startOnPad" => s.settings.start_on_pad = value,
+            "desktopControl" => s.settings.desktop_control = value,
+            "desktopAutoKeyboard" => s.settings.desktop_auto_keyboard = value,
             "checkUpdates" => s.settings.check_updates = value,
             _ => return Err(t!(format!("Unknown setting: {key}"), format!("Setare necunoscută: {key}"))),
         }
         store::save(&s.data_dir, "settings.json", &s.settings);
+        desktop::configure(&s.settings);
         Ok(s.settings.clone())
     }
+}
+
+/// The buttons and actions of the desktop control, and the mapping it starts with.
+#[tauri::command]
+fn desktop_layout() -> desktop::Layout {
+    desktop::layout()
+}
+
+/// Sets the speed of the cursor and of scrolling in the desktop control (1 to 10). `None` leaves one as it is.
+#[tauri::command]
+fn set_desktop_speed(state: State<'_, AppState>, mouse: Option<u8>, scroll: Option<u8>) -> Result<Settings, String> {
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    if let Some(v) = mouse {
+        s.settings.desktop_mouse_speed = v.clamp(1, 10);
+    }
+    if let Some(v) = scroll {
+        s.settings.desktop_scroll_speed = v.clamp(1, 10);
+    }
+    store::save(&s.data_dir, "settings.json", &s.settings);
+    desktop::configure(&s.settings);
+    Ok(s.settings.clone())
+}
+
+/// Maps a controller button to an action of the desktop control. An empty `action` (or `None`) gives the
+/// button back its default; with no `button` every button goes back to its default.
+#[tauri::command]
+fn set_desktop_button(state: State<'_, AppState>, button: Option<String>, action: Option<String>) -> Result<Settings, String> {
+    let mut s = state.inner.lock().map_err(lock_err)?;
+    match button {
+        None => s.settings.desktop_map.clear(),
+        Some(b) => {
+            if !desktop::BUTTONS.contains(&b.as_str()) {
+                return Err(t!(format!("Unknown button: {b}"), format!("Buton necunoscut: {b}")));
+            }
+            match action.filter(|a| !a.is_empty()) {
+                None => {
+                    s.settings.desktop_map.remove(&b);
+                }
+                Some(a) if desktop::ACTIONS.contains(&a.as_str()) => {
+                    if desktop::default_map().get(&b) == Some(&a) {
+                        s.settings.desktop_map.remove(&b);
+                    } else {
+                        s.settings.desktop_map.insert(b, a);
+                    }
+                }
+                Some(a) => return Err(t!(format!("Unknown action: {a}"), format!("Acțiune necunoscută: {a}"))),
+            }
+        }
+    }
+    store::save(&s.data_dir, "settings.json", &s.settings);
+    desktop::configure(&s.settings);
+    Ok(s.settings.clone())
+}
+
+/// Quick menu → Switch to Desktop: Lumen steps aside and the controller drives the mouse and keyboard.
+#[tauri::command]
+fn switch_to_desktop(app: AppHandle) {
+    desktop::switch_to_desktop(&app);
+}
+
+/// Typing on the desktop's on-screen keyboard: the text goes to the window that has the focus.
+#[tauri::command(async)]
+fn osk_type(text: String) {
+    desktop::osk_type(text);
+}
+
+/// `backspace`, `left`, `right` or `enter` on the on-screen keyboard.
+#[tauri::command(async)]
+fn osk_edit(kind: String) {
+    desktop::osk_edit(kind);
+}
+
+#[tauri::command]
+fn osk_close(app: AppHandle) {
+    desktop::osk_close(app);
 }
 
 /// Gives a Bluetooth device a name of the user's choosing; an empty name goes back to the Windows one.
@@ -663,6 +742,8 @@ fn main() {
                 data_dir,
             };
             app.manage(AppState { inner: Mutex::new(inner) });
+            desktop::configure(&app.state::<AppState>().inner.lock().map_err(|_| "state")?.settings);
+            desktop::start(app.handle().clone());
             guide::start(app.handle().clone());
             migrate_autostart(app.handle().clone());
             Ok(())
@@ -679,6 +760,13 @@ fn main() {
             resume_game,
             set_setting,
             set_language,
+            desktop_layout,
+            set_desktop_speed,
+            set_desktop_button,
+            switch_to_desktop,
+            osk_type,
+            osk_edit,
+            osk_close,
             add_game_folder,
             remove_game_folder,
             add_game,

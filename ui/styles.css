@@ -522,3 +522,22 @@ body.panel-open .hints {
   font-size: 1.3rem; font-weight: 700; color: var(--ink);
 }
 .glyph svg { width: 1.5rem; height: 1.5rem; }
+
+/* The keyboard window of the desktop control: nothing but the keyboard, on a transparent page. */
+body.osk { background: transparent; overflow: hidden; }
+body.osk > :not(.osk-panel) { display: none !important; }
+/* Sized by the width of the screen, whatever the height of this short, wide window is. */
+:root:has(body.osk) { font-size: calc(100vw / 192); }
+body.osk .osk-panel { transition: none; padding-top: 2rem; padding-bottom: 2rem; }
+/* Six rows of keys plus the text above them have to fit the window (45 units of 1/192 of the screen's width). */
+body.osk .kb-key { height: 5.4rem; }
+body.osk .osk-text { min-height: 6rem; margin-bottom: 1.2rem; }
+/* The text of the field being typed into, above the keys. */
+.osk-text {
+  display: flex; align-items: center; min-height: 7rem; margin: 0 0 1.6rem; padding: 0 2.4rem;
+  font-size: 3rem; background: rgba(255, 255, 255, 0.08); border: 0.2rem solid rgba(255, 255, 255, 0.25);
+  border-radius: 0.8rem; overflow: hidden; white-space: pre;
+}
+.osk-value { min-width: 0; overflow: hidden; }
+.osk-caret { flex: none; width: 0.2rem; height: 4rem; margin-left: 0.3rem; background: #fff; animation: osk-blink 1s steps(1) infinite; }
+@keyframes osk-blink { 50% { opacity: 0; } }

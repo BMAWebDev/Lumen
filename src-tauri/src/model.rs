@@ -61,6 +61,16 @@ pub struct Settings {
     pub language: String,
     /// Names the user gave to Bluetooth devices, by Windows device id.
     pub bluetooth_names: HashMap<String, String>,
+    /// The controller drives the mouse and keyboard while Lumen is in the background.
+    pub desktop_control: bool,
+    /// Clicking a text field opens the on-screen keyboard by itself.
+    pub desktop_auto_keyboard: bool,
+    /// 1 to 10.
+    pub desktop_mouse_speed: u8,
+    /// 1 to 10.
+    pub desktop_scroll_speed: u8,
+    /// Buttons the user remapped, by button name (see `desktop::BUTTONS`); the rest keep the default action.
+    pub desktop_map: HashMap<String, String>,
 }
 
 impl Default for Settings {
@@ -78,6 +88,11 @@ impl Default for Settings {
             check_updates: true,
             language: "en".into(),
             bluetooth_names: HashMap::new(),
+            desktop_control: false,
+            desktop_auto_keyboard: true,
+            desktop_mouse_speed: 6,
+            desktop_scroll_speed: 6,
+            desktop_map: HashMap::new(),
         }
     }
 }

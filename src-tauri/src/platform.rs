@@ -424,10 +424,9 @@ pub fn focus_window_of(pids: &[u32]) -> bool {
     focus_window(pids, (0, 0))
 }
 
-/// Like `focus_window_of`, but ignores windows smaller than `min` (width, height):
-/// a game's splash screens and launchers are not the game window.
+/// The largest visible, unowned window of the processes that is at least `min` in size.
 #[cfg(windows)]
-pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
+fn find_window(pids: &[u32], min: (i32, i32)) -> isize {
     use win::*;
     struct Search<'a> {
         pids: &'a [u32],
@@ -458,19 +457,40 @@ pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
     }
     let mut s = Search { pids, min, best: 0, area: 0 };
     unsafe { EnumWindows(visit, &mut s as *mut Search as isize) };
-    if s.best == 0 {
+    s.best
+}
+
+/// Like `focus_window_of`, but ignores windows smaller than `min` (width, height):
+/// a game's splash screens and launchers are not the game window.
+#[cfg(windows)]
+pub fn focus_window(pids: &[u32], min: (i32, i32)) -> bool {
+    use win::*;
+    let best = find_window(pids, min);
+    if best == 0 {
         return false;
     }
     unsafe {
         // As in `bring_to_front`: an Alt press unlocks SetForegroundWindow.
         keybd_event(0x12, 0, 0, 0);
         keybd_event(0x12, 0, 2, 0);
-        ShowWindow(s.best, if IsIconic(s.best) != 0 { 9 } else { 5 }); // SW_RESTORE / SW_SHOW
-        BringWindowToTop(s.best);
-        SetForegroundWindow(s.best);
+        ShowWindow(best, if IsIconic(best) != 0 { 9 } else { 5 }); // SW_RESTORE / SW_SHOW
+        BringWindowToTop(best);
+        SetForegroundWindow(best);
     }
     true
 }
+
+/// Minimizes the main window of one of the processes, so what is behind it shows.
+#[cfg(windows)]
+pub fn minimize_window_of(pids: &[u32]) {
+    let w = find_window(pids, (0, 0));
+    if w != 0 {
+        unsafe { win::ShowWindow(w, 11) }; // SW_FORCEMINIMIZE: works even if the game is not responding
+    }
+}
+
+#[cfg(not(windows))]
+pub fn minimize_window_of(_pids: &[u32]) {}
 
 #[cfg(not(windows))]
 pub fn focus_window(_pids: &[u32], _min: (i32, i32)) -> bool {

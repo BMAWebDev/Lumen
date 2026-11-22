@@ -799,11 +799,11 @@ function control(it) {
 }
 
 /** Side panel with a vertical list of options. */
-function listPanel({ title, note, items }) {
+function listPanel({ title, note, items, start = 0 }) {
   const panel = el('aside', 'panel');
   panel.innerHTML = `<header><h2>${esc(title)}</h2>${note ? `<p>${esc(note)}</p>` : ''}</header><ul></ul>`;
   const ul = $('ul', panel);
-  let idx = 0;
+  let idx = clamp(start, 0, Math.max(0, items.length - 1));
   const focus = () => {
     [...ul.children].forEach((c, i) => c.classList.toggle('focused', i === idx));
     ul.children[idx]?.scrollIntoView({ block: 'nearest' });
@@ -1213,6 +1213,7 @@ async function controllersLoad() {
   if (usbRes.status === 'rejected') note = String(usbRes.reason);
   if (btRes.status === 'rejected') {
     items.push({ group: t('bt.title'), label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+    items.push(...(await desktopItems()));
     return { items, note: String(btRes.reason) };
   }
   devices.forEach((d, i) => items.push({
@@ -1224,7 +1225,101 @@ async function controllersLoad() {
     action: () => openBluetoothDevice(d),
   }));
   items.push({ group: devices.length ? '' : t('bt.title'), label: t('bt.add'), desc: t('bt.add.desc'), action: scanBluetooth });
+  items.push(...(await desktopItems()));
   return { items, note: note || (devices.length ? t('bt.note') : t('bt.none')) };
+}
+
+// Desktop control: the controller drives the mouse and the keyboard while Lumen is in the background.
+// Here it is turned on, its speeds are set and every button is mapped to an action (the backend owns the lists).
+const DESK_LEVELS = [2, 4, 6, 8, 10]; // the five speeds, out of the 1-10 the backend takes
+const DESK_BUTTONS = {
+  xbox: { a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', lt: 'LT', rt: 'RT', view: 'View', menu: 'Menu', l3: 'LS', r3: 'RS' },
+  playstation: { a: '✕', b: '○', x: '□', y: '△', lb: 'L1', rb: 'R1', lt: 'L2', rt: 'R2', view: 'Create', menu: 'Options', l3: 'L3', r3: 'R3' },
+};
+let deskLayout = null; // { buttons, actions, defaults }, fetched once
+
+const deskButtonName = (b) => DESK_BUTTONS[S.pad]?.[b] ?? t(`desk.dpad.${b}`);
+const deskActionOf = (b) => S.settings.desktopMap?.[b] ?? deskLayout.defaults[b];
+const deskActionName = (a) => t(`desk.act.${a}`);
+const deskLevel = (v) => DESK_LEVELS.reduce((best, l, i) => (Math.abs(l - v) < Math.abs(DESK_LEVELS[best] - v) ? i : best), 0);
+
+async function desktopItems() {
+  try { deskLayout ||= await call('desktop_layout'); } catch { return []; }
+  const speed = (key, label, field) => ({
+    label,
+    desc: t(`desk.level.${deskLevel(S.settings[field] ?? 6)}`),
+    action: () => openDeskSpeed(key, label, field),
+  });
+  return [
+    {
+      group: t('desk.title'), label: t('desk.toggle'), desc: t('desk.toggle.desc'),
+      toggle: () => !!S.settings.desktopControl,
+      action: () => setSetting('desktopControl', !S.settings.desktopControl),
+    },
+    {
+      label: t('desk.autoKeyboard'), desc: t('desk.autoKeyboard.desc'),
+      toggle: () => S.settings.desktopAutoKeyboard !== false,
+      action: () => setSetting('desktopAutoKeyboard', S.settings.desktopAutoKeyboard === false),
+    },
+    speed('mouse', t('desk.mouse'), 'desktopMouseSpeed'),
+    speed('scroll', t('desk.scroll'), 'desktopScrollSpeed'),
+    { label: t('desk.map'), desc: t('desk.map.desc'), action: () => openDeskMap() },
+  ];
+}
+
+function openDeskSpeed(key, title, field) {
+  pushOverlay(listPanel({
+    title,
+    items: DESK_LEVELS.map((v, i) => ({
+      label: t(`desk.level.${i}`),
+      radio: () => deskLevel(S.settings[field] ?? 6) === i,
+      action: async () => {
+        try { S.settings = await call('set_desktop_speed', { [key]: v }); } catch (e) { toast(String(e), 'error'); }
+        closeTop(true);
+        refreshCat('controllers')();
+      },
+    })),
+    start: deskLevel(S.settings[field] ?? 6),
+  }));
+}
+
+/** One row per button with what it does; picking one opens the list of actions. `at` keeps the place after a change. */
+function openDeskMap(at = 0, silent = false) {
+  const buttons = deskLayout.buttons;
+  const items = buttons.map((b) => ({
+    label: deskButtonName(b),
+    desc: deskActionName(deskActionOf(b)),
+    action: () => openDeskAction(b, buttons.indexOf(b)),
+  }));
+  items.push({
+    label: t('desk.reset'),
+    danger: true,
+    action: async () => {
+      try { S.settings = await call('set_desktop_button', {}); } catch (e) { toast(String(e), 'error'); }
+      closeTop(true);
+      openDeskMap(0, true);
+    },
+  });
+  pushOverlay(listPanel({ title: t('desk.map'), note: t('desk.map.note'), items, start: at }), silent);
+}
+
+function openDeskAction(button, at) {
+  const current = deskActionOf(button);
+  const actions = deskLayout.actions;
+  pushOverlay(listPanel({
+    title: t('desk.pick', { button: deskButtonName(button) }),
+    items: actions.map((a) => ({
+      label: deskActionName(a),
+      radio: () => a === current,
+      action: async () => {
+        try { S.settings = await call('set_desktop_button', { button, action: a }); } catch (e) { toast(String(e), 'error'); }
+        closeTop(true);
+        closeTop(true);
+        openDeskMap(at, true);
+      },
+    })),
+    start: actions.indexOf(current),
+  }));
 }
 
 /**
@@ -1333,34 +1428,26 @@ const KB_TAGS = {
 };
 
 /**
- * Text popup with an on-screen keyboard docked at the bottom, laid out like the console ones.
+ * The on-screen keyboard itself: the keys, the focused key and what each controller button does on it.
+ * The text popup and the desktop keyboard (a window of its own that types into other programs) share it;
+ * they differ in what happens to the text, which they pass in: `insert`, `deleteChar`, `moveCaret`,
+ * `onCancel` (cancel key, B / circle) and `onDone` (done key, R2). `labels` renames the last row's keys.
  * Controller: D-pad moves, confirm types, square deletes (hold to repeat), triangle types a space,
  * L2 toggles shift, R3 changes the character set, L1 / R1 move the cursor, R2 is Done, back cancels.
- * Physical keyboard: type in the field, Enter saves, Escape cancels. The keys also work with the mouse.
  */
-function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, onSubmit }) {
-  const panel = el('div', 'dialog');
-  panel.setAttribute('role', 'dialog');
-  panel.innerHTML = `<header><h2>${esc(title)}</h2>${note ? `<p>${esc(note)}</p>` : ''}</header>`;
-  const input = el('input', 'name-field');
-  input.type = 'text';
-  input.maxLength = maxLength;
-  input.value = value;
-  input.placeholder = placeholder;
-  panel.appendChild(input);
+function createKeyboard({ insert, deleteChar, moveCaret, onCancel, onDone, labels = {}, silent = false }) {
   const board = el('div', 'kb');
-  panel.appendChild(board);
-
   const chars = (s) => [...s].map((ch) => ({ ch }));
   const fn = (act, label, span) => ({ act, label, span });
   const layout = () => [
     ...KB_MODES[mode].map(chars),
     [fn('shift', '⇧', 2), fn('abc', 'ABC', 1), fn('sym', '@#:', 1), fn('acc', 'àă', 1), { act: 'space', span: 4, svg: '<svg class="space-icon" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true"><path d="M1 3v13h98V3" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/></svg>' }, fn('del', '⌫', 2)],
-    [fn('left', '◀', 2), fn('right', '▶', 2), fn('cancel', t('common.cancel'), 3), fn('done', t('kb.done'), 4)],
+    [fn('left', '◀', 2), fn('right', '▶', 2), fn('cancel', labels.cancel || t('common.cancel'), 3), fn('done', labels.done || t('kb.done'), 4)],
   ];
-  let mode = 'abc', r = 1, c = 0, shift = false, submitted = false;
+  let mode = 'abc', r = 1, c = 0, shift = false;
   const starts = (row) => { let x = 0; return row.map((k) => { const s = x; x += k.span || 1; return s; }); };
   const label = (k) => (k.ch ? (shift ? k.ch.toUpperCase() : k.ch) : k.label);
+  const sfx = (name) => { if (!silent) sound.play(name); };
 
   const draw = () => {
     const rows = layout();
@@ -1376,13 +1463,72 @@ function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, 
           `${k.svg || esc(label(k))}${tags && tags[k.act] ? `<i>${esc(tags[k.act])}</i>` : ''}`);
         b.tabIndex = -1;
         b.style.gridColumn = `span ${k.span || 1}`;
-        b.addEventListener('mousedown', (e) => e.preventDefault()); // keep the focus in the field
+        b.addEventListener('mousedown', (e) => e.preventDefault()); // keep the focus where it is
         b.addEventListener('click', () => { r = ri; c = ci; press(k); draw(); });
         line.appendChild(b);
       });
       board.appendChild(line);
     });
   };
+
+  const setMode = (m) => { mode = m; shift = false; draw(); };
+  const press = (k) => {
+    sfx('confirm');
+    if (k.ch) { insert(shift ? k.ch.toUpperCase() : k.ch); shift = false; }
+    else if (k.act === 'shift') shift = !shift;
+    else if (KB_MODES[k.act]) setMode(k.act);
+    else if (k.act === 'space') insert(' ');
+    else if (k.act === 'del') deleteChar();
+    else if (k.act === 'left') moveCaret(-1);
+    else if (k.act === 'right') moveCaret(1);
+    else if (k.act === 'cancel') onCancel();
+    else if (k.act === 'done') onDone();
+  };
+  const move = (a) => {
+    const rows = layout();
+    if (a === 'left') c = Math.max(0, c - 1);
+    else if (a === 'right') c = Math.min(rows[r].length - 1, c + 1);
+    else {
+      const x = starts(rows[r])[c] + (rows[r][c].span || 1) / 2;
+      r = clamp(r + (a === 'up' ? -1 : 1), 0, rows.length - 1);
+      c = Math.max(0, starts(rows[r]).findLastIndex((s) => s <= Math.floor(x)));
+    }
+    sfx('move');
+    draw();
+  };
+  /** What a controller action does on the keyboard. */
+  const handle = (a) => {
+    if (['up', 'down', 'left', 'right'].includes(a)) move(a);
+    else if (a === 'confirm') { press(layout()[r][c]); draw(); }
+    else if (a === 'back') onCancel();
+    else if (a === 'delete') deleteChar();
+    else if (a === 'options') insert(' '); // triangle
+    else if (a === 'first') { shift = !shift; sfx('move'); draw(); } // L2
+    else if (a === 'last') { sfx('confirm'); onDone(); } // R2
+    else if (a === 'prevTab') moveCaret(-1); // L1
+    else if (a === 'nextTab') moveCaret(1); // R1
+    else if (a === 'mode') setMode(KB_MODE_ORDER[(KB_MODE_ORDER.indexOf(mode) + 1) % KB_MODE_ORDER.length]); // R3
+  };
+  /** Back to the first key and the letters, for a keyboard that is shown again. */
+  const reset = () => { mode = 'abc'; r = 1; c = 0; shift = false; draw(); };
+  return { board, draw, handle, reset };
+}
+
+/**
+ * Text popup with an on-screen keyboard docked at the bottom, laid out like the console ones.
+ * Physical keyboard: type in the field, Enter saves, Escape cancels. The keys also work with the mouse.
+ */
+function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, onSubmit }) {
+  const panel = el('div', 'dialog');
+  panel.setAttribute('role', 'dialog');
+  panel.innerHTML = `<header><h2>${esc(title)}</h2>${note ? `<p>${esc(note)}</p>` : ''}</header>`;
+  const input = el('input', 'name-field');
+  input.type = 'text';
+  input.maxLength = maxLength;
+  input.value = value;
+  input.placeholder = placeholder;
+  panel.appendChild(input);
+  let submitted = false;
 
   // Editing happens at the cursor of the field, so L1 / R1 and the physical keyboard agree.
   const insert = (s) => {
@@ -1400,39 +1546,16 @@ function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, 
     input.setSelectionRange(p, p);
   };
   const submit = () => { if (submitted) return; submitted = true; onSubmit(input.value); };
-  const setMode = (m) => { mode = m; shift = false; draw(); };
-  const press = (k) => {
-    sound.play('confirm');
-    if (k.ch) { insert(shift ? k.ch.toUpperCase() : k.ch); shift = false; }
-    else if (k.act === 'shift') shift = !shift;
-    else if (KB_MODES[k.act]) setMode(k.act);
-    else if (k.act === 'space') insert(' ');
-    else if (k.act === 'del') deleteChar();
-    else if (k.act === 'left') moveCaret(-1);
-    else if (k.act === 'right') moveCaret(1);
-    else if (k.act === 'cancel') closeTop();
-    else if (k.act === 'done') submit();
-  };
-  const move = (a) => {
-    const rows = layout();
-    if (a === 'left') c = Math.max(0, c - 1);
-    else if (a === 'right') c = Math.min(rows[r].length - 1, c + 1);
-    else {
-      const x = starts(rows[r])[c] + (rows[r][c].span || 1) / 2;
-      r = clamp(r + (a === 'up' ? -1 : 1), 0, rows.length - 1);
-      c = Math.max(0, starts(rows[r]).findLastIndex((s) => s <= Math.floor(x)));
-    }
-    sound.play('move');
-    draw();
-  };
+  const kb = createKeyboard({ insert, deleteChar, moveCaret, onCancel: () => closeTop(), onDone: submit });
+  panel.appendChild(kb.board);
 
   return {
     type: 'dialog',
     // The key tags follow the device in use; the global hint bar stays empty for this popup.
-    hints: () => { draw(); return []; },
+    hints: () => { kb.draw(); return []; },
     open() {
       document.body.appendChild(panel);
-      draw();
+      kb.draw();
       nextFrame().then(() => {
         panel.classList.add('in');
         input.focus();
@@ -1448,18 +1571,54 @@ function textPanel({ title, note, value = '', placeholder = '', maxLength = 40, 
         return;
       }
       if (document.activeElement !== input) input.focus({ preventScroll: true });
-      if (['up', 'down', 'left', 'right'].includes(a)) move(a);
-      else if (a === 'confirm') { press(layout()[r][c]); draw(); }
-      else if (a === 'back') closeTop();
-      else if (a === 'delete') deleteChar();
-      else if (a === 'options') insert(' '); // triangle
-      else if (a === 'first') { shift = !shift; sound.play('move'); draw(); } // L2
-      else if (a === 'last') { sound.play('confirm'); submit(); } // R2
-      else if (a === 'prevTab') moveCaret(-1); // L1
-      else if (a === 'nextTab') moveCaret(1); // R1
-      else if (a === 'mode') setMode(KB_MODE_ORDER[(KB_MODE_ORDER.indexOf(mode) + 1) % KB_MODE_ORDER.length]); // R3
+      kb.handle(a);
     },
   };
+}
+
+/**
+ * The keyboard of the desktop control: shown in a window of its own at the bottom of the screen, which never takes
+ * the focus, so the keys it types reach the program that was in front. The backend sends it the controller's
+ * buttons (`osk-action`) because the window is not the one that has the focus.
+ */
+async function bootOsk() {
+  measureRem();
+  window.addEventListener('resize', measureRem);
+  window.addEventListener('contextmenu', (e) => e.preventDefault());
+  try { setLang((await call('get_state')).settings?.language); } catch { /* the default language stays */ }
+  document.body.classList.remove('booting');
+  document.body.classList.add('osk');
+  S.device = 'gamepad';
+  const close = () => call('osk_close');
+  // What is shown above the keys: the text of the field when the program lets the backend read it (`field`),
+  // else what was typed here since the keyboard opened (`typed`).
+  const shown = el('div', 'osk-text');
+  let field = null, typed = '';
+  const drawText = () => {
+    // An empty reading may just be a program that does not update its value while it is typed into.
+    const text = field?.text ? field.text : typed;
+    const chars = [...(field?.password ? '•'.repeat([...text].length) : text)];
+    const visible = chars.slice(-48).join(''); // a long text shows its end, where the typing is
+    shown.textContent = '';
+    shown.append(el('span', 'osk-value', esc(visible)), el('i', 'osk-caret'));
+  };
+  const kb = createKeyboard({
+    insert: (s) => { typed += s; drawText(); call('osk_type', { text: s }); },
+    deleteChar: () => { typed = [...typed].slice(0, -1).join(''); drawText(); call('osk_edit', { kind: 'backspace' }); },
+    moveCaret: (d) => call('osk_edit', { kind: d < 0 ? 'left' : 'right' }),
+    onCancel: close,
+    onDone: () => { call('osk_edit', { kind: 'enter' }); close(); },
+    labels: { cancel: t('osk.close'), done: t('osk.enter') },
+    silent: true,
+  });
+  const root = el('div', 'dialog in osk-panel');
+  root.append(shown, kb.board);
+  document.body.appendChild(root);
+  kb.draw();
+  drawText();
+  on('osk-show', (pad) => { S.pad = pad === 'playstation' ? 'playstation' : 'xbox'; field = null; typed = ''; drawText(); kb.reset(); });
+  on('osk-text', (f) => { field = f; drawText(); });
+  on('osk-action', (a) => { if (a === 'menu') close(); else kb.handle(a); });
 }
 
 /** Closes the open panels and reloads the Bluetooth list. */
@@ -1641,6 +1800,7 @@ function openQuick() {
   if (running) cards.push({ label: t('opt.closeNamed', { name: running.name }), icon: icons.close, danger: true, run: () => askCloseGame() });
   cards.push(
     { label: t('detail.refresh'), icon: icons.refresh, run: () => { closeAll(); rescan(true); } },
+    { label: t('quick.desktop'), icon: icons.monitor, run: () => { closeAll(); call('switch_to_desktop'); } },
     { label: t('settings.title'), icon: icons.gear, run: () => openSettings() },
     { label: t('power.title'), icon: icons.power, run: () => openPower() },
   );
@@ -2030,6 +2190,7 @@ async function loadTheme() {
 // Startup
 // ======================================================================
 async function boot() {
+  if (new URLSearchParams(location.search).has('osk')) return bootOsk();
   measureRem();
   $('#btn-settings').innerHTML = icons.gear;
   syncClockFormat();

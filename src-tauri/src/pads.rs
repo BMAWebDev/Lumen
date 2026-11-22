@@ -167,6 +167,81 @@ pub struct PadInput {
     pub battery: Option<(u8, bool)>,
 }
 
+/// The state of a controller as the desktop control reads it: one bit per button (numbered like the browser's
+/// "standard" mapping, see `desktop::BUTTONS`) and the sticks from -1 to 1, with y growing downwards.
+#[derive(Clone, Copy, Default, Debug)]
+pub struct RawPad {
+    pub buttons: u32,
+    pub lx: f32,
+    pub ly: f32,
+    pub rx: f32,
+    pub ry: f32,
+    /// A Sony controller (the button hints follow it).
+    pub sony: bool,
+}
+
+impl RawPad {
+    /// Whether anything is pressed or pushed.
+    pub fn active(&self) -> bool {
+        self.buttons != 0 || [self.lx, self.ly, self.rx, self.ry].iter().any(|v| v.abs() > 0.15)
+    }
+}
+
+/// The latest state of a Sony controller and when it arrived.
+#[cfg(windows)]
+static RAW: std::sync::Mutex<Option<(std::time::Instant, RawPad)>> = std::sync::Mutex::new(None);
+
+/// The state of a Sony controller, if one reported in the last moments.
+#[cfg(windows)]
+pub fn raw_pad() -> Option<RawPad> {
+    let (at, pad) = (*RAW.lock().ok()?)?;
+    (at.elapsed() < std::time::Duration::from_millis(300)).then_some(pad)
+}
+
+#[cfg(not(windows))]
+pub fn raw_pad() -> Option<RawPad> {
+    None
+}
+
+/// Reads sticks and buttons from the input report of a Sony controller, for the desktop control.
+/// The layout is the same as in `engaged`: (first stick byte, first button byte).
+#[cfg(windows)]
+fn decode_raw(model: Sony, bt: bool, r: &[u8]) -> Option<RawPad> {
+    let (stick, btn) = match (model, bt, r.first().copied()) {
+        (Sony::DualSense, false, Some(0x01)) => (1, 8),
+        (Sony::DualSense, true, Some(0x31)) => (2, 9),
+        (Sony::DualShock4, true, Some(0x11)) => (3, 8),
+        (_, _, Some(0x01)) => (1, 5),
+        _ => return None,
+    };
+    let (s, b) = (r.get(stick..stick + 4)?, r.get(btn..btn + 2)?);
+    let mut m = 0u32;
+    let mut set = |bit: u32, on: bool| {
+        if on {
+            m |= 1 << bit;
+        }
+    };
+    set(0, b[0] & 0x20 != 0); // cross
+    set(1, b[0] & 0x40 != 0); // circle
+    set(2, b[0] & 0x10 != 0); // square
+    set(3, b[0] & 0x80 != 0); // triangle
+    set(4, b[1] & 0x01 != 0);
+    set(5, b[1] & 0x02 != 0);
+    set(6, b[1] & 0x04 != 0);
+    set(7, b[1] & 0x08 != 0);
+    set(8, b[1] & 0x10 != 0);
+    set(9, b[1] & 0x20 != 0);
+    set(10, b[1] & 0x40 != 0);
+    set(11, b[1] & 0x80 != 0);
+    let hat = b[0] & 0x0f;
+    set(12, matches!(hat, 0 | 1 | 7));
+    set(13, matches!(hat, 3 | 4 | 5));
+    set(14, matches!(hat, 5 | 6 | 7));
+    set(15, matches!(hat, 1 | 2 | 3));
+    let f = |v: u8| (f32::from(v) - 128.0) / 128.0;
+    Some(RawPad { buttons: m, lx: f(s[0]), ly: f(s[1]), rx: f(s[2]), ry: f(s[3]), sony: true })
+}
+
 /// Decodes the full input report (0x31) of a DualSense over Bluetooth: the sticks are bytes 2-5, the
 /// buttons bytes 9-11 (D-pad as a hat in the low nibble of byte 9), the battery byte 54.
 #[cfg(windows)]
@@ -327,6 +402,12 @@ fn watch(
                     if engaged(p.model, p.bt, &buf[..n]) {
                         if let Ok(mut last) = LAST_ACTIVE.lock() {
                             *last = Some((p.bt, Instant::now()));
+                        }
+                    }
+                    // Only the running Lumen (which has an input listener) feeds the desktop control.
+                    if on_input.is_some() {
+                        if let (Some(raw), Ok(mut slot)) = (decode_raw(p.model, p.bt, &buf[..n]), RAW.lock()) {
+                            *slot = Some((Instant::now(), raw));
                         }
                     }
                     if let (Some(f), Some(last)) = (on_input, p.sent) {

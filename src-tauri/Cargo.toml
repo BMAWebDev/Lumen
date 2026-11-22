@@ -16,6 +16,8 @@ tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 # Reading the battery of Sony controllers (DualSense, DualShock 4) directly over HID.
+# UI Automation: tells whether the focused control takes text, and reads the text typed on the on-screen keyboard.
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Accessibility"] }
 hidapi = { version = "2", default-features = false, features = ["windows-native"] }
 
 [profile.release]

@@ -100,7 +100,7 @@ const stats = {};
 DATA.forEach(([, , , , , ago, play], i) => {
   if (ago) stats[games[i].id] = { playtimeSec: play, lastPlayed: now - ago, launches: 3 + i };
 });
-const settings = { minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, startOnPad: false, checkUpdates: true, language: 'en', gameFolders: [] };
+const settings = { desktopControl: false, desktopAutoKeyboard: true, desktopMouseSpeed: 6, desktopScrollSpeed: 6, desktopMap: {}, minimizeOnLaunch: true, pauseGame: true, sounds: true, music: true, onlineArt: true, reduceMotion: false, autostart: false, startOnPad: false, checkUpdates: true, language: 'en', gameFolders: [] };
 let running = null;
 let audioOut = 'a';
 const AUDIO = [['a', 'Speakers (Realtek Audio)'], ['b', 'Headphones (Razer Kraken)'], ['c', 'LG TV (NVIDIA High Definition Audio)']];
@@ -142,6 +142,22 @@ export async function invoke(cmd, args) {
       settings.bluetoothNames = names;
       return { ...settings };
     }
+    case 'desktop_layout':
+      return {
+        buttons: ['a', 'b', 'x', 'y', 'lb', 'rb', 'lt', 'rt', 'view', 'menu', 'l3', 'r3', 'up', 'down', 'left', 'right'],
+        actions: ['none', 'left_click', 'right_click', 'middle_click', 'enter', 'escape', 'tab', 'backspace', 'space', 'delete', 'up', 'down', 'left', 'right', 'page_up', 'page_down', 'home', 'end', 'win', 'alt_tab', 'back', 'forward', 'task_view', 'show_desktop', 'close_window', 'keyboard'],
+        defaults: { a: 'left_click', b: 'escape', x: 'enter', y: 'keyboard', lb: 'back', rb: 'alt_tab', lt: 'right_click', rt: 'left_click', view: 'tab', menu: 'win', l3: 'middle_click', r3: 'none', up: 'up', down: 'down', left: 'left', right: 'right' },
+      };
+    case 'set_desktop_speed':
+      if (args.mouse != null) settings.desktopMouseSpeed = args.mouse;
+      if (args.scroll != null) settings.desktopScrollSpeed = args.scroll;
+      return { ...settings };
+    case 'set_desktop_button':
+      if (args.button == null) settings.desktopMap = {};
+      else settings.desktopMap = { ...settings.desktopMap, [args.button]: args.action };
+      return { ...settings };
+    case 'osk_type': case 'osk_edit': case 'osk_close':
+      return null;
     case 'set_setting':
       settings[args.key] = args.value;
       return { ...settings };
