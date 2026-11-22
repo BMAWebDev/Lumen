@@ -1,5 +1,6 @@
 //! Launching games and tracking them until they close.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -149,10 +150,28 @@ pub fn minimize_game(app: &AppHandle) {
 
 /// Freezes the running game, so presses in the Lumen menu don't reach it too.
 pub fn pause(app: &AppHandle) {
+    // Back in the menu: the freeze held for the desktop follows the normal rules again.
+    let was_held = DESKTOP_HOLD.swap(false, Ordering::Relaxed);
+    freeze(app, false);
+    if was_held && !app.state::<AppState>().inner.lock().is_ok_and(|s| s.settings.pause_game) {
+        unpause();
+    }
+}
+
+/// Switch to Desktop: the game is frozen whatever the setting says, and stays frozen after Lumen loses focus.
+pub fn freeze_for_desktop(app: &AppHandle) {
+    DESKTOP_HOLD.store(true, Ordering::Relaxed);
+    freeze(app, true);
+}
+
+/// Set while the game is frozen on purpose for the desktop; losing focus must not wake it up.
+static DESKTOP_HOLD: AtomicBool = AtomicBool::new(false);
+
+fn freeze(app: &AppHandle, force: bool) {
     let state = app.state::<AppState>();
     let dir = {
         let Ok(s) = state.inner.lock() else { return };
-        if !s.settings.pause_game {
+        if !force && !s.settings.pause_game {
             return;
         }
         let Some(r) = s.running.as_ref().filter(|r| r.started) else { return };
@@ -163,7 +182,7 @@ pub fn pause(app: &AppHandle) {
     if paused.is_some() {
         return;
     }
-    let pids: Vec<u32> = platform::procs_under(&dir).into_iter().filter(|&p| platform::set_suspended(p, true)).collect();
+    let pids: Vec<u32> = game_pids(&dir).into_iter().filter(|&p| platform::set_suspended(p, true)).collect();
     if !pids.is_empty() {
         *paused = Some((pids, Instant::now()));
     }
@@ -171,6 +190,7 @@ pub fn pause(app: &AppHandle) {
 
 /// Resumes the game paused by `pause`.
 pub fn unpause() {
+    DESKTOP_HOLD.store(false, Ordering::Relaxed);
     let Ok(mut paused) = PAUSED.lock() else { return };
     if let Some((pids, _)) = paused.take() {
         for pid in pids {
@@ -181,6 +201,9 @@ pub fn unpause() {
 
 /// Lumen lost focus (alt-tab, the game was brought to the front): the game has no reason to stay frozen.
 pub fn unpause_after_blur() {
+    if DESKTOP_HOLD.load(Ordering::Relaxed) {
+        return;
+    }
     let settled = PAUSED.lock().is_ok_and(|p| p.as_ref().is_some_and(|(_, at)| at.elapsed() > PAUSE_SETTLE));
     if settled {
         unpause();

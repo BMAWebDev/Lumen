@@ -111,19 +111,22 @@ pub fn switch_to_desktop(_app: &AppHandle) {}
 pub fn switch_to_desktop(app: &AppHandle) {
     use tauri::Manager;
     FORCED.store(true, Ordering::Relaxed);
-    // A game frozen by the menu would stay frozen behind the desktop.
-    crate::launcher::unpause();
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.minimize();
     }
     // With a game running, it is the window that would come back to the front.
     crate::launcher::minimize_game(app);
     // If something else still covers the desktop (a game we could not find, run from elsewhere), Win+D clears it.
-    std::thread::spawn(|| {
+    let app = app.clone();
+    std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));
         if !win::desktop_in_front() {
             win::chord(&[win::VK_LWIN, 0x44]);
+            std::thread::sleep(std::time::Duration::from_millis(400));
         }
+        // The game must not keep reading the controller behind the desktop. It is frozen only now, once
+        // its window is out of the way: a frozen window cannot minimize.
+        crate::launcher::freeze_for_desktop(&app);
     });
 }
 
